@@ -1,0 +1,10 @@
+[package]
+name = "micdeck"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+micdeck-core = { version = "0.1.0", path = "../core" }
+micdeck-duocast = { version = "0.1.0", path = "../drivers/duocast" }
+rusb = { version = "0.9.4", features = ["vendored"] }
