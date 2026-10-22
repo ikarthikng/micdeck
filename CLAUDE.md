@@ -62,8 +62,10 @@ Plan: (1) offline test on recorded WAVs [done, works well at strength 90]; (2) l
 
 - `stream::Engine` (start/stop pipeline; `Drop` stops the devices and frees the shared data) is the API the future menu-bar app will use in-process. `micdeck meeting on [strength] [output]` / `off` / `status` (cli/src/background.rs) is only a thin shim: it starts `micdeck meeting-run` detached (setsid), keeps the pid in `$TMPDIR/micdeck-meeting.pid`, errors go to `$TMPDIR/micdeck-meeting.log`; `on` waits 1.5 s so start-up failures are shown immediately. Default output is "BlackHole". No restart after crash/reboot. Decision: NOT launchd now, because a bare launchd binary has no app identity so macOS may silently deny microphone access (needs an app bundle), and a daemon design would need an IPC protocol; revisit with the menu-bar app.
 
+- Real-call feedback from the owner: with the mic close to the mouth it works as intended; with the mic on the desk near keyboard/mouse the listener heard clicks (little while talking); a quiet phone video was audible mildly while the owner talked and cut away in silence (expected: gate is open while talking). Listener said the audio was much better with the meeting filter on. Owner is content with testing so far; fine-tuning can come later. Mic position is the biggest lever; "close mic" vs "desk mic" could become named modes.
+
 ## Next step
-Owner verifies audio flows from the detached process (record BlackHole while `meeting on` is active), then try a real call from a personal context, then the menu-bar app. Open questions: typing WHILE speaking, background talkers while speaking (need a closer mic), automatic output level.
+Lighting protocol (decision made: own USB capture on the owner's Windows PC with NGENUITY + Wireshark + USBPcap, NOT reading QuadcastRGB source). Captures go in `captures/` (gitignored). Decode the .pcapng with a small Python script (USBPcap link type 249), work out the color packet, then implement `micdeck color <rrggbb>` through the DuoCast driver using IOKit HID (SetReport) if possible. After that: hotplug + saved settings, then the menu-bar app. Open questions: typing WHILE speaking, background talkers while speaking (need a closer mic), automatic output level.
 
 ## Later
 Lighting protocol (read QuadcastRGB for facts only vs own Windows capture), hotplug detection, saved profiles.
