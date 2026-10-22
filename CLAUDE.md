@@ -64,8 +64,15 @@ Plan: (1) offline test on recorded WAVs [done, works well at strength 90]; (2) l
 
 - Real-call feedback from the owner: with the mic close to the mouth it works as intended; with the mic on the desk near keyboard/mouse the listener heard clicks (little while talking); a quiet phone video was audible mildly while the owner talked and cut away in silence (expected: gate is open while talking). Listener said the audio was much better with the meeting filter on. Owner is content with testing so far; fine-tuning can come later. Mic position is the biggest lever; "close mic" vs "desk mic" could become named modes.
 
+## Lighting protocol (decoded from our own capture, `captures/ngenuity.pcapng`, tool: `tools/decode_usbpcap.py`)
+NGENUITY lights the DuoCast Controller (03f0:098c) with HID FEATURE reports (64 bytes, report id 0, interface 0, sent as control transfers: bmRequestType 0x21, bRequest 0x09 SET_REPORT, wValue 0x0300, wIndex 0, wLength 0x40). Each update is a PAIR sent ~10 ms apart, repeated ~44 times a second while NGENUITY runs:
+- Packet A: `04 f2 00 00 00 00 00 00 01` then zeros (header / apply; identical every time).
+- Packet B: 14 entries of `81 RR GG BB` (4 bytes each) then zeros to 64 bytes. Entries 0 and 1 carry the color (two zones?), entries 2-13 are `81 00 00 00` (off).
+Seen: (242,0,0) `81 f2 00 00`; (255,0,0); (0,104,255) `81 00 68 ff`; (50,255,0) `81 32 ff 00`.
+Unknown: whether the mic keeps a color after ONE pair or needs the stream; brightness, effects, "off", per-zone differences; meaning of the trailing `01` in packet A. The capture also contains traffic from an unrelated device (0cf2:a105) in the owner's PC; ignore it. Send these with IOKit `IOHIDDeviceSetReport` (feature type), no rusb needed. Only replay what NGENUITY itself sends; never firmware.
+
 ## Next step
-Lighting protocol (decision made: own USB capture on the owner's Windows PC with NGENUITY + Wireshark + USBPcap, NOT reading QuadcastRGB source). Captures go in `captures/` (gitignored). Decode the .pcapng with a small Python script (USBPcap link type 249), work out the color packet, then implement `micdeck color <rrggbb>` through the DuoCast driver using IOKit HID (SetReport) if possible. After that: hotplug + saved settings, then the menu-bar app. Open questions: typing WHILE speaking, background talkers while speaking (need a closer mic), automatic output level.
+Implement `micdeck color <rrggbb>` (branch `feature/lighting-color`): DuoCast driver builds the two packets, `core/src/hid.rs` sends feature reports. Needs the mic plugged back into the Mac to test (it was on the Windows PC for the capture). Then a second, careful capture for brightness/effects/off, then hotplug + saved settings, then the menu-bar app.
 
 ## Later
 Lighting protocol (read QuadcastRGB for facts only vs own Windows capture), hotplug detection, saved profiles.
