@@ -81,9 +81,8 @@ pub fn watch<F: FnMut(u32, u32, isize)>(vid: u16, pid: u16, mut on_value: F) -> 
         // The filter is a dictionary like {VendorID: 1008, ProductID: 2700}.
         let keys = [cf_str("VendorID"), cf_str("ProductID")];
         let values = [cf_int(vid.into()), cf_int(pid.into())];
-        // pid 0 = any product from this vendor
         let matching = CFDictionaryCreate(
-            std::ptr::null(), keys.as_ptr(), values.as_ptr(), if pid == 0 { 1 } else { 2 },
+            std::ptr::null(), keys.as_ptr(), values.as_ptr(), 2,
             (&raw const kCFTypeDictionaryKeyCallBacks).cast(), (&raw const kCFTypeDictionaryValueCallBacks).cast(),
         );
         // Always call this: without it the manager matches nothing.

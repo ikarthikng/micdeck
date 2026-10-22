@@ -93,7 +93,7 @@ fn gain(level: f32, threshold: f32) -> f32 {
 }
 
 /// Convert a linear level (0.0 to 1.0) to decibels. The tiny minimum avoids taking the log of zero.
-pub fn db(level: f32) -> f32 {
+fn db(level: f32) -> f32 {
     20.0 * level.max(1e-9).log10()
 }
 

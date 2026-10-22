@@ -5,7 +5,6 @@
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Capability {
     Color,
-    Brightness,
 }
 
 /// What every mic driver must provide. A "trait" is Rust's way of describing a set of methods that different
