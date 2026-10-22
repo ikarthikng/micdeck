@@ -153,10 +153,15 @@ fn name(id: Id) -> Result<String, String> {
     Ok(unsafe { std::ffi::CStr::from_ptr(buf.as_ptr()) }.to_string_lossy().into_owned())
 }
 
+/// The first device in `list` whose name contains `part` (case-insensitive).
+fn find(list: Vec<AudioDevice>, part: &str) -> Option<AudioDevice> {
+    let part = part.to_lowercase();
+    list.into_iter().find(|d| d.name.to_lowercase().contains(&part))
+}
+
 /// First recording device whose name contains `part` (case-insensitive).
 pub fn find_input(part: &str) -> Result<Option<AudioDevice>, String> {
-    let part = part.to_lowercase();
-    Ok(input_devices()?.into_iter().find(|d| d.name.to_lowercase().contains(&part)))
+    Ok(find(input_devices()?, part))
 }
 
 impl AudioDevice {
@@ -194,6 +199,5 @@ impl AudioDevice {
 
 /// First playback device whose name contains `part` (case-insensitive).
 pub fn find_output(part: &str) -> Result<Option<AudioDevice>, String> {
-    let part = part.to_lowercase();
-    Ok(output_devices()?.into_iter().find(|d| d.name.to_lowercase().contains(&part)))
+    Ok(find(output_devices()?, part))
 }

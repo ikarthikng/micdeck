@@ -19,7 +19,7 @@ The owner is new to Rust and hardware work and relies on Claude for standards an
 - **Never implement firmware flashing.**
 - **Avoid "HyperX" in the product name** (trademark). Not affiliated with HyperX or HP.
 - **Language:** Rust core and CLI. Native SwiftUI menu-bar app as the frontend later (lightest option on macOS).
-- **Dependencies:** as few as possible. Prefer macOS built-in frameworks. Current: `rusb` (USB, vendored libusb) and `nnnoiseless` 0.5.2 (pure-Rust RNNoise port, BSD-3-Clause, GPL-3 compatible, no system libs; pulls ~25 pure-Rust FFT/math crates; works on any macOS/arch). Ask before adding more.
+- **Dependencies:** as few as possible. Prefer macOS built-in frameworks. Current: only `nnnoiseless` 0.5.2 (pure-Rust RNNoise port, BSD-3-Clause, GPL-3 compatible, no system libs; pulls ~25 pure-Rust FFT/math crates; works on any macOS/arch). Ask before adding more.
 - **Modularity:** one driver crate per mic under `drivers/`, chosen at build time (Cargo features). The core defines a `Device` trait. Each driver declares its capabilities and frontends show only those controls.
 - **Order of work:** core library, then the `micdeck` CLI, then the GUI. Frontend and CLI both link the core library, with no background service unless hotplug needs one.
 - **Also planned:** hotplug detection, saved profiles, a fake mic for tests without hardware, a driver template plus a contributor guide, a universal (Apple Silicon + Intel) build.
@@ -38,9 +38,7 @@ The owner is new to Rust and hardware work and relies on Claude for standards an
 - Workspace: `core/` (micdeck-core), `drivers/duocast/` (micdeck-duocast), `cli/` (micdeck).
 
 ## Done
-- `micdeck` CLI (rusb, vendored libusb, no brew needed) prints 03f0:098c interfaces/endpoints. Result: interface 0 = HID, interrupt OUT 0x01 (8 bytes); interface 1 = HID, interrupt IN 0x82 (8 bytes, probably the mute/media keys). Interface 0's OUT endpoint is the likely lighting channel.
-
-- CLI also reads HID report descriptors (works on macOS without claiming the interface). Interface 0 = vendor-defined (usage page 0xFF90, no report ID): 64-byte input report, 64-byte output report, and a feature report. The 64-byte output report is the likely lighting command. Note the endpoint max packet is only 8, so a report may be sent in chunks or via control transfer (SET_REPORT). Interface 1 = consumer keys (report ID 3, 16-bit usage) plus a vendor report ID 5 (7 bytes in).
+- USB exploration (done early, then removed with `rusb` in the ponytail cleanup because nothing else used it; re-add `rusb` only if lighting needs raw USB). Findings of 03f0:098c: interface 0 = HID, interrupt OUT 0x01 (8 bytes); interface 1 = HID, interrupt IN 0x82 (8 bytes, probably the mute/media keys). Interface 0's OUT endpoint is the likely lighting channel. HID report descriptors: interface 0 = vendor-defined (usage page 0xFF90, no report ID): 64-byte input report, 64-byte output report, and a feature report. The 64-byte output report is the likely lighting command. The endpoint max packet is only 8, so a report may be sent in chunks or via control transfer (SET_REPORT). Interface 1 = consumer keys (report ID 3, 16-bit usage) plus a vendor report ID 5 (7 bytes in). macOS refuses raw USB claims on the HID interfaces (even with sudo); use IOKit HID (`core/src/hid.rs`) instead.
 
 - Core Audio module `core/src/audio.rs` (hand-written FFI, no dependencies, macOS only). CLI: `micdeck audio | mute on|off | gain <0-100>`. Tested: mute on/off works on the DuoCast. The DuoCast exposes NO software gain to macOS (only mute); gain is the physical knob. Gain code works for other mics (AirPods, webcam).
 - DuoCast audio device is found by name ("duocast"); Core Audio does not expose USB IDs.
