@@ -32,8 +32,11 @@ fn main() {
         ["color", hex, "hold"] => color(hex, 100, true),
         ["color", hex, n] => percent(n, "brightness").and_then(|n| color(hex, n, false)),
         ["color", hex, n, "hold"] => percent(n, "brightness").and_then(|n| color(hex, n, true)),
+        ["effect", name] => effect(name, "ff0000", 100),
+        ["effect", name, hex] => effect(name, hex, 100),
+        ["effect", name, hex, n] => percent(n, "brightness").and_then(|n| effect(name, hex, n)),
         ["mute", m @ ("on" | "off")] => audio(None, Some(m == "on")),
-        _ => Err("usage: micdeck devices | watch | audio | meeting on [strength 0-100] [output name] | meeting off | meeting status | meeting <file.wav> [strength 0-100] | meeting-run [strength 0-100] [output name] | color <rrggbb> [brightness 0-100] [hold] | settings | settings set <strength|output> <value> | gain <0-100> | mute on|off".into()),
+        _ => Err("usage: micdeck devices | watch | audio | meeting on [strength 0-100] [output name] | meeting off | meeting status | meeting <file.wav> [strength 0-100] | meeting-run [strength 0-100] [output name] | color <rrggbb> [brightness 0-100] [hold] | effect <name> [rrggbb] [brightness 0-100] | settings | settings set <strength|output> <value> | gain <0-100> | mute on|off".into()),
     };
     // Print errors on stderr (not stdout) so they do not mix with a command's normal output.
     if let Err(e) = result {
@@ -42,16 +45,21 @@ fn main() {
     }
 }
 
-/// Set the mic's light color from a hex code such as `ff0000` (red). A leading `#` is allowed. The mic treats
-/// this as a live preview that fades back after a moment; add `hold` to keep sending it until Ctrl-C.
-/// `brightness` is 0-100 (100 = the color as typed).
-fn color(hex: &str, brightness: u8, hold: bool) -> Result<(), String> {
-    use micdeck_core::Device;
+/// Turn a hex code such as `ff0000` (a leading `#` is allowed) into [red, green, blue].
+fn parse_color(hex: &str) -> Result<[u8; 3], String> {
     let hex = hex.trim_start_matches('#');
     // Six hex digits = three bytes: red, green, blue.
     let value = (hex.len() == 6).then(|| u32::from_str_radix(hex, 16).ok()).flatten().ok_or("color must be six hex digits, like ff0000")?;
     let [_, r, g, b] = value.to_be_bytes();
-    let rgb = micdeck_core::with_brightness([r, g, b], brightness);
+    Ok([r, g, b])
+}
+
+/// Set the mic's light color from a hex code such as `ff0000` (red). The mic treats this as a live preview
+/// that fades back after a moment; add `hold` to keep sending it until Ctrl-C. `brightness` is 0-100
+/// (100 = the color as typed).
+fn color(hex: &str, brightness: u8, hold: bool) -> Result<(), String> {
+    use micdeck_core::Device;
+    let rgb = micdeck_core::with_brightness(parse_color(hex)?, brightness);
     if hold {
         println!("holding #{hex} at {brightness}% brightness; press Ctrl-C to stop");
         return micdeck_duocast::DuoCast.hold_color(rgb);
@@ -59,6 +67,19 @@ fn color(hex: &str, brightness: u8, hold: bool) -> Result<(), String> {
     micdeck_duocast::DuoCast.set_color(rgb)?;
     println!("color set to #{hex} at {brightness}% brightness (a preview: the mic goes back to its own default; use `hold` to keep it)");
     Ok(())
+}
+
+/// Play a lighting effect until Ctrl-C. Breathing and Solid use the color; the other effects make their own.
+fn effect(name: &str, hex: &str, brightness: u8) -> Result<(), String> {
+    use micdeck_core::{effects, with_brightness};
+    let effect = effects::Effect::parse(name).ok_or_else(|| format!("unknown effect \"{name}\"; choose one of: {}", effects::Effect::names()))?;
+    let base = parse_color(hex)?;
+    println!("playing {name} at {brightness}% brightness; press Ctrl-C to stop");
+    micdeck_duocast::DuoCast.play(|t| {
+        // The DuoCast has two lights; dim each one by the brightness setting.
+        let zones = effects::frame(effect, t, base, 2);
+        [with_brightness(zones[0], brightness), with_brightness(zones[1], brightness)]
+    })
 }
 
 /// Parse a 0-100 setting (strength, brightness) typed on the command line. `what` names it in the error message.

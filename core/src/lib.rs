@@ -56,3 +56,5 @@ mod tests {
 }
 
 pub mod settings;
+
+pub mod effects;
