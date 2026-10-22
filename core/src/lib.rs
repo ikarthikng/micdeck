@@ -19,6 +19,16 @@ pub trait Device {
     }
 }
 
+/// Dim a color: `percent` 100 leaves it as is, 50 makes it half as bright, 0 turns it off (black). The mic has
+/// no brightness command of its own (NGENUITY just sends smaller color numbers), so brightness is applied here.
+// ponytail: plain linear scaling; LEDs look non-linear to the eye, so low values may seem brighter than the
+// number suggests. Add a gamma curve if that bothers anyone.
+pub fn with_brightness(rgb: [u8; 3], percent: u8) -> [u8; 3] {
+    let percent = percent.min(100) as u32;
+    // Multiply, then divide by 100 with +50 so the result is rounded to the nearest number instead of rounded down.
+    rgb.map(|channel| ((channel as u32 * percent + 50) / 100) as u8)
+}
+
 #[cfg(target_os = "macos")]
 pub mod audio;
 
@@ -31,3 +41,16 @@ pub mod meeting;
 
 #[cfg(target_os = "macos")]
 pub mod stream;
+
+#[cfg(test)]
+mod tests {
+    use super::with_brightness;
+
+    #[test]
+    fn brightness_scales_each_channel() {
+        assert_eq!(with_brightness([255, 128, 0], 100), [255, 128, 0]); // unchanged
+        assert_eq!(with_brightness([255, 128, 0], 50), [128, 64, 0]); // half, rounded to nearest
+        assert_eq!(with_brightness([255, 128, 0], 0), [0, 0, 0]); // off
+        assert_eq!(with_brightness([255, 128, 0], 200), [255, 128, 0]); // over 100 counts as 100
+    }
+}

@@ -13,23 +13,25 @@ fn main() {
         ["watch"] => watch(),
         // Meeting mode in the background (these must come before the `meeting <file>` arms below).
         ["meeting", "on"] => background::on(60, "BlackHole"),
-        ["meeting", "on", n] => strength(n).and_then(|n| background::on(n, "BlackHole")),
-        ["meeting", "on", n, out] => strength(n).and_then(|n| background::on(n, out)),
+        ["meeting", "on", n] => percent(n, "strength").and_then(|n| background::on(n, "BlackHole")),
+        ["meeting", "on", n, out] => percent(n, "strength").and_then(|n| background::on(n, out)),
         ["meeting", "off"] => background::off(),
         ["meeting", "status"] => background::status(),
         ["meeting", file] => meeting(file, 60),
-        ["meeting", file, n] => strength(n).and_then(|n| meeting(file, n)),
+        ["meeting", file, n] => percent(n, "strength").and_then(|n| meeting(file, n)),
         ["devices"] => devices(),
         ["meeting-run"] => run_live(60, None),
-        ["meeting-run", n] => strength(n).and_then(|n| run_live(n, None)),
-        ["meeting-run", n, out] => strength(n).and_then(|n| run_live(n, Some(out))),
+        ["meeting-run", n] => percent(n, "strength").and_then(|n| run_live(n, None)),
+        ["meeting-run", n, out] => percent(n, "strength").and_then(|n| run_live(n, Some(out))),
         ["audio"] => audio(None, None),
         ["gain", v] => v.parse().map_err(|_| "gain must be 0 to 100".to_string()).and_then(|v: f32| audio(Some(v / 100.0), None)),
         // `m @ ("on" | "off")` matches only those two words and keeps the one that matched in `m`.
-        ["color", hex] => color(hex, false),
-        ["color", hex, "hold"] => color(hex, true),
+        ["color", hex] => color(hex, 100, false),
+        ["color", hex, "hold"] => color(hex, 100, true),
+        ["color", hex, n] => percent(n, "brightness").and_then(|n| color(hex, n, false)),
+        ["color", hex, n, "hold"] => percent(n, "brightness").and_then(|n| color(hex, n, true)),
         ["mute", m @ ("on" | "off")] => audio(None, Some(m == "on")),
-        _ => Err("usage: micdeck devices | watch | audio | meeting on [strength 0-100] [output device name] | meeting off | meeting status | meeting <file.wav> [strength 0-100] | meeting-run [strength 0-100] [output device name] | color <rrggbb> [hold] | gain <0-100> | mute on|off".into()),
+        _ => Err("usage: micdeck devices | watch | audio | meeting on [strength 0-100] [output device name] | meeting off | meeting status | meeting <file.wav> [strength 0-100] | meeting-run [strength 0-100] [output device name] | color <rrggbb> [brightness 0-100] [hold] | gain <0-100> | mute on|off".into()),
     };
     // Print errors on stderr (not stdout) so they do not mix with a command's normal output.
     if let Err(e) = result {
@@ -40,24 +42,26 @@ fn main() {
 
 /// Set the mic's light color from a hex code such as `ff0000` (red). A leading `#` is allowed. The mic treats
 /// this as a live preview that fades back after a moment; add `hold` to keep sending it until Ctrl-C.
-fn color(hex: &str, hold: bool) -> Result<(), String> {
+/// `brightness` is 0-100 (100 = the color as typed).
+fn color(hex: &str, brightness: u8, hold: bool) -> Result<(), String> {
     use micdeck_core::Device;
     let hex = hex.trim_start_matches('#');
     // Six hex digits = three bytes: red, green, blue.
     let value = (hex.len() == 6).then(|| u32::from_str_radix(hex, 16).ok()).flatten().ok_or("color must be six hex digits, like ff0000")?;
     let [_, r, g, b] = value.to_be_bytes();
+    let rgb = micdeck_core::with_brightness([r, g, b], brightness);
     if hold {
-        println!("holding #{hex}; press Ctrl-C to stop");
-        return micdeck_duocast::DuoCast.hold_color([r, g, b]);
+        println!("holding #{hex} at {brightness}% brightness; press Ctrl-C to stop");
+        return micdeck_duocast::DuoCast.hold_color(rgb);
     }
-    micdeck_duocast::DuoCast.set_color([r, g, b])?;
-    println!("color set to #{hex} (a preview: the mic goes back to its own default; use `hold` to keep it)");
+    micdeck_duocast::DuoCast.set_color(rgb)?;
+    println!("color set to #{hex} at {brightness}% brightness (a preview: the mic goes back to its own default; use `hold` to keep it)");
     Ok(())
 }
 
-/// Parse the 0-100 strength setting typed on the command line.
-fn strength(text: &str) -> Result<u8, String> {
-    text.parse().map_err(|_| "strength must be a number from 0 to 100".into())
+/// Parse a 0-100 setting (strength, brightness) typed on the command line. `what` names it in the error message.
+fn percent(text: &str, what: &str) -> Result<u8, String> {
+    text.parse().ok().filter(|&n| n <= 100).ok_or_else(|| format!("{what} must be a number from 0 to 100"))
 }
 
 /// Show (and optionally change) the DuoCast's recording gain and mute.
