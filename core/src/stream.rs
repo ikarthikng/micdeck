@@ -2,6 +2,12 @@
 //! headphones or a virtual mic like BlackHole. Hand-written Core Audio bindings, no dependencies.
 //!
 //! The HAL hands us 32-bit float samples (interleaved or one buffer per channel); both devices must run at 48 kHz.
+//!
+//! How it works: Core Audio calls a function of ours ("callback") over and over, a few hundred times a
+//! second, on its own high-priority audio thread. The INPUT device's callback gives us a small block of
+//! recorded samples; we clean them and put them in a shared waiting line (the queue). The OUTPUT device's
+//! callback asks us for a block of samples to play; we take them from the same queue. The queue is what
+//! connects the two, because the two devices run on separate clocks and never call us at the same moment.
 
 use crate::audio::{check, fc, get, Addr, AudioDevice, Id, GLOBAL};
 use crate::meeting::LiveGate;
@@ -16,11 +22,13 @@ const PREFILL: usize = 960;
 /// ...and never more than 100 ms, so the delay cannot build up when one device runs slightly faster.
 const MAX_QUEUE: usize = 4_800;
 
+/// One block of audio from Core Audio. If `channels` > 1 the samples are interleaved: left, right, left,
+/// right... If a device uses one Buffer per channel instead, each Buffer has `channels` = 1.
 #[repr(C)]
 struct Buffer {
     channels: u32,
-    bytes: u32,
-    data: *mut f32,
+    bytes: u32,     // size of the block in bytes (4 bytes per f32 sample)
+    data: *mut f32, // pointer to the first sample
 }
 
 /// Core Audio's AudioBufferList: a count, then that many buffers laid out one after another.
@@ -30,6 +38,8 @@ struct BufferList {
     first: Buffer,
 }
 
+/// The shape Core Audio requires for our callbacks. Most arguments (timestamps etc.) we do not need; the
+/// ones that matter are the input block, the output block, and `ctx`, the pointer to our own data.
 type IoProc = extern "C" fn(Id, *const c_void, *const BufferList, *const c_void, *mut BufferList, *const c_void, *mut c_void) -> i32;
 
 #[link(name = "CoreAudio", kind = "framework")]
@@ -41,27 +51,33 @@ extern "C" {
 
 // ponytail: plain mutexes in the audio callbacks. Fine while only two threads touch them; swap for a
 // lock-free ring buffer if glitches show up under load.
+/// Data shared by both callbacks. A `Mutex` makes sure only one thread touches its contents at a time.
 struct Shared {
-    gate: Mutex<LiveGate>,
-    queue: Mutex<VecDeque<f32>>,
+    gate: Mutex<LiveGate>,        // the cleanup; only the input callback uses it
+    queue: Mutex<VecDeque<f32>>,  // cleaned samples waiting to be played; input pushes at the back, output pops from the front
 }
 
+/// View Core Audio's list of buffers as a normal Rust slice, which is much easier to loop over.
 fn buffers<'a>(list: *const BufferList) -> &'a [Buffer] {
     // SAFETY: Core Audio passes a valid list with `count` buffers for the length of the callback.
     unsafe { std::slice::from_raw_parts(&(*list).first, (*list).count as usize) }
 }
 
+/// How many "frames" (one sample per channel at one instant) a block holds: bytes / 4 per sample / channels.
 fn frames(bufs: &[Buffer]) -> usize {
     bufs.first().map_or(0, |b| b.bytes as usize / 4 / b.channels.max(1) as usize)
 }
 
+/// Called by Core Audio with a block of freshly recorded audio: mix to mono, clean each sample, queue it.
 extern "C" fn on_input(_: Id, _: *const c_void, input: *const BufferList, _: *const c_void, _: *mut BufferList, _: *const c_void, ctx: *mut c_void) -> i32 {
+    // `ctx` is the raw pointer to `Shared` that we gave Core Audio in `start`; turn it back into a reference.
     let shared = unsafe { &*ctx.cast::<Shared>() };
     let bufs = buffers(input);
     let channels: usize = bufs.iter().map(|b| b.channels as usize).sum();
     if channels == 0 {
         return 0;
     }
+    // Lock both for the whole block, instead of once per sample, to keep the callback fast.
     let (mut gate, mut queue) = (shared.gate.lock().unwrap(), shared.queue.lock().unwrap());
     for f in 0..frames(bufs) {
         // Mix all channels down to one.
@@ -69,16 +85,20 @@ extern "C" fn on_input(_: Id, _: *const c_void, input: *const BufferList, _: *co
         for b in bufs {
             let n = b.channels as usize;
             let data = unsafe { std::slice::from_raw_parts(b.data, b.bytes as usize / 4) };
+            // Frame `f` of an interleaved block is the `n` samples starting at position f * n; add them up.
             sum += data[f * n..f * n + n].iter().sum::<f32>();
         }
         queue.push_back(gate.run(sum / channels as f32));
     }
+    // If the queue has grown too long (the mic runs a bit faster than the output), drop the oldest samples
+    // so the delay does not creep up over time.
     while queue.len() > MAX_QUEUE {
         queue.pop_front();
     }
     0
 }
 
+/// Called by Core Audio when the output device needs a block of audio to play: fill it from the queue.
 extern "C" fn on_output(_: Id, _: *const c_void, _: *const BufferList, _: *const c_void, output: *mut BufferList, _: *const c_void, ctx: *mut c_void) -> i32 {
     let shared = unsafe { &*ctx.cast::<Shared>() };
     let bufs = buffers(output);
@@ -88,6 +108,7 @@ extern "C" fn on_output(_: Id, _: *const c_void, _: *const BufferList, _: *const
         for b in bufs {
             let n = b.channels as usize;
             let data = unsafe { std::slice::from_raw_parts_mut(b.data, b.bytes as usize / 4) };
+            // Write the same mono sample into every channel (left and right) of this frame.
             data[f * n..f * n + n].fill(s);
         }
     }
@@ -97,6 +118,7 @@ extern "C" fn on_output(_: Id, _: *const c_void, _: *const BufferList, _: *const
 /// Make sure the device runs at 48 kHz (RNNoise needs it), switching it if it does not. This also changes
 /// the rate for other apps using the device.
 fn ensure_rate(dev: &AudioDevice) -> Result<(), String> {
+    // 'nsrt' is the nominal sample rate property; it is a 64-bit float in Hz.
     let now = || get::<f64>(dev.id, fc(b"nsrt"), GLOBAL, 0);
     if now()? == RATE as f64 {
         return Ok(());
@@ -111,6 +133,7 @@ fn ensure_rate(dev: &AudioDevice) -> Result<(), String> {
     Ok(())
 }
 
+/// Register a callback with a device and start it. `id` is the handle Core Audio gives back for our callback.
 fn start(dev: &AudioDevice, io: IoProc, shared: *mut Shared) -> Result<(), String> {
     let mut id = std::ptr::null();
     check(unsafe { AudioDeviceCreateIOProcID(dev.id, io, shared.cast(), &mut id) }, &format!("open {}", dev.name))?;
@@ -122,13 +145,17 @@ fn start(dev: &AudioDevice, io: IoProc, shared: *mut Shared) -> Result<(), Strin
 pub fn run(input: &AudioDevice, output: &AudioDevice, strength: u8) -> Result<(), String> {
     ensure_rate(input)?;
     ensure_rate(output)?;
-    // Leaked on purpose: the callbacks use it until the process exits.
+    // `Box::leak` puts the data on the heap and never frees it. That is intentional: the callbacks keep a
+    // pointer to it for as long as the program runs, so it must never be freed or moved.
     let shared = Box::leak(Box::new(Shared {
         gate: Mutex::new(LiveGate::new(RATE, strength)),
         queue: Mutex::new(VecDeque::from(vec![0.0; PREFILL])),
     }));
+    // Start the output first so it is ready to play as soon as the first cleaned samples arrive.
     start(output, on_output, shared)?;
     start(input, on_input, shared)?;
+    // The audio work happens on Core Audio's threads. This thread has nothing to do, so it sleeps. `park` can
+    // wake up spuriously, which is why it sits in a loop.
     loop {
         std::thread::park();
     }
