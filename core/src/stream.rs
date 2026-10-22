@@ -9,7 +9,7 @@
 //! callback asks us for a block of samples to play; we take them from the same queue. The queue is what
 //! connects the two, because the two devices run on separate clocks and never call us at the same moment.
 
-use crate::audio::{check, fc, get, Addr, AudioDevice, Id, GLOBAL};
+use crate::audio::{check, fc, find_input, find_output, get, Addr, AudioDevice, Id, GLOBAL};
 use crate::meeting::LiveGate;
 use std::collections::VecDeque;
 use std::ffi::c_void;
@@ -190,12 +190,44 @@ impl Drop for Engine {
     }
 }
 
-/// Run an `Engine` in the foreground until the process is stopped (Ctrl-C, or a kill signal).
-pub fn run(input: &AudioDevice, output: &AudioDevice, strength: u8) -> Result<(), String> {
-    let _engine = Engine::start(input, output, strength)?;
-    // The audio work happens on Core Audio's threads. This thread has nothing to do, so it sleeps. `park` can
-    // wake up spuriously, which is why it sits in a loop.
+/// How often `run` checks whether the devices are still there. Checking is simpler than registering macOS
+/// device-change listeners, and two seconds is quick enough for someone plugging a cable in.
+const POLL: Duration = Duration::from_secs(2);
+
+/// The first recording device and the first playback device whose names contain these texts (either may be
+/// missing). A failure to list devices counts as "missing", so a hiccup cannot stop `run`.
+fn look(input_name: &str, output_name: &str) -> (Option<AudioDevice>, Option<AudioDevice>) {
+    (find_input(input_name).ok().flatten(), find_output(output_name).ok().flatten())
+}
+
+/// Run the cleanup until the process is stopped (Ctrl-C, or a kill signal): record from the device whose
+/// name contains `input_name`, play into the one that contains `output_name`.
+///
+/// It survives unplugging. If either device disappears, the audio is stopped, and it starts again when
+/// both are back. A device that is missing right at the start is an error instead, so a typo in a name is
+/// reported at once and not waited on forever. Progress messages go to stderr.
+pub fn run(input_name: &str, output_name: &str, strength: u8) -> Result<(), String> {
+    let mut first_try = true;
     loop {
-        std::thread::park();
+        match look(input_name, output_name) {
+            (Some(input), Some(output)) => match Engine::start(&input, &output, strength) {
+                Ok(engine) => {
+                    eprintln!("running: {} -> {}", input.name, output.name);
+                    // The audio itself runs on Core Audio's threads; this thread just waits until a device disappears.
+                    while let (Some(_), Some(_)) = look(input_name, output_name) {
+                        std::thread::sleep(POLL);
+                    }
+                    drop(engine); // stops the audio and frees everything (see `Engine`'s `drop`)
+                    eprintln!("a device was unplugged; waiting for it to come back");
+                }
+                Err(e) if first_try => return Err(e),
+                Err(e) => eprintln!("could not restart ({e}); will try again"),
+            },
+            (None, _) if first_try => return Err(format!("no recording device matching \"{input_name}\"")),
+            (_, None) if first_try => return Err(format!("no output device matching \"{output_name}\"")),
+            _ => {} // not back yet; keep waiting
+        }
+        first_try = false;
+        std::thread::sleep(POLL);
     }
 }
