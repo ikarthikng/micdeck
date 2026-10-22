@@ -15,8 +15,8 @@ fn main() {
         ["meeting", "on"] => on(None, None),
         ["meeting", "on", n] => percent(n, "strength").and_then(|n| on(Some(n), None)),
         ["meeting", "on", n, out] => percent(n, "strength").and_then(|n| on(Some(n), Some(out))),
-        ["meeting", "off"] => background::off(),
-        ["meeting", "status"] => background::status(),
+        ["meeting", "off"] => background::MEETING.stop(),
+        ["meeting", "status"] => background::MEETING.status(),
         ["meeting", file] => meeting(file, None),
         ["meeting", file, n] => percent(n, "strength").and_then(|n| meeting(file, Some(n))),
         ["devices"] => devices(),
@@ -32,11 +32,17 @@ fn main() {
         ["color", hex, "hold"] => color(hex, 100, true),
         ["color", hex, n] => percent(n, "brightness").and_then(|n| color(hex, n, false)),
         ["color", hex, n, "hold"] => percent(n, "brightness").and_then(|n| color(hex, n, true)),
+        // The lights in the background: a color or effect that keeps streaming after the terminal is closed.
+        ["light", "on", name] => light_on(name, "ff0000", 100),
+        ["light", "on", name, hex] => light_on(name, hex, 100),
+        ["light", "on", name, hex, n] => percent(n, "brightness").and_then(|n| light_on(name, hex, n)),
+        ["light", "off"] => background::LIGHT.stop(),
+        ["light", "status"] => background::LIGHT.status(),
         ["effect", name] => effect(name, "ff0000", 100),
         ["effect", name, hex] => effect(name, hex, 100),
         ["effect", name, hex, n] => percent(n, "brightness").and_then(|n| effect(name, hex, n)),
         ["mute", m @ ("on" | "off")] => audio(None, Some(m == "on")),
-        _ => Err("usage: micdeck devices | watch | audio | meeting on [strength 0-100] [output name] | meeting off | meeting status | meeting <file.wav> [strength 0-100] | meeting-run [strength 0-100] [output name] | color <rrggbb> [brightness 0-100] [hold] | effect <name> [rrggbb] [brightness 0-100] | settings | settings set <strength|output> <value> | gain <0-100> | mute on|off".into()),
+        _ => Err("usage: micdeck devices | watch | audio | meeting on [strength 0-100] [output name] | meeting off | meeting status | meeting <file.wav> [strength 0-100] | meeting-run [strength 0-100] [output name] | color <rrggbb> [brightness 0-100] [hold] | effect <name> [rrggbb] [brightness 0-100] | light on <effect> [rrggbb] [brightness 0-100] | light off | light status | settings | settings set <strength|output> <value> | gain <0-100> | mute on|off".into()),
     };
     // Print errors on stderr (not stdout) so they do not mix with a command's normal output.
     if let Err(e) = result {
@@ -67,6 +73,14 @@ fn color(hex: &str, brightness: u8, hold: bool) -> Result<(), String> {
     micdeck_duocast::DuoCast.set_color(rgb)?;
     println!("color set to #{hex} at {brightness}% brightness (a preview: the mic goes back to its own default; use `hold` to keep it)");
     Ok(())
+}
+
+/// Start a lighting effect in the background (see `background.rs`). `solid` with a color is a steady color.
+/// The name and color are checked here, so a typo is reported at once.
+fn light_on(name: &str, hex: &str, brightness: u8) -> Result<(), String> {
+    micdeck_core::effects::Effect::parse(name).ok_or_else(|| format!("unknown effect \"{name}\"; choose one of: {}", micdeck_core::effects::Effect::names()))?;
+    parse_color(hex)?;
+    background::LIGHT.start(&["effect", name, hex, &brightness.to_string()], &format!("{name}, brightness {brightness}%"))
 }
 
 /// Play a lighting effect until Ctrl-C. Breathing and Solid use the color; the other effects make their own.
@@ -145,7 +159,7 @@ fn meeting_options(strength: Option<u8>, output: Option<&str>) -> Result<(u8, St
 /// Start meeting mode in the background (see `background.rs`).
 fn on(strength: Option<u8>, output: Option<&str>) -> Result<(), String> {
     let (strength, output) = meeting_options(strength, output)?;
-    background::on(strength, &output)
+    background::MEETING.start(&["meeting-run", &strength.to_string(), &output], &format!("DuoCast -> {output}, strength {strength}"))
 }
 
 /// Clean the DuoCast's audio live in this terminal and play it into the output device (a virtual mic such as

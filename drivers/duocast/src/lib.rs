@@ -62,12 +62,28 @@ impl DuoCast {
     /// seconds after the start (an effect, for instance). The mic treats a color update as a live preview and
     /// returns to its own default soon after the updates stop, so we send one about 21 times a second (every
     /// 47 ms), the rate NGENUITY uses in our capture.
+    ///
+    /// If the mic is unplugged while playing, it waits and carries on when the mic is back. A mic that is
+    /// missing right at the start is an error instead. Progress messages go to stderr.
     pub fn play(&self, mut colors_at: impl FnMut(f32) -> [[u8; 3]; 2]) -> Result<(), String> {
-        let handle = open()?;
         let start = std::time::Instant::now();
+        let mut first_try = true;
         loop {
-            send(&handle, colors_at(start.elapsed().as_secs_f32()))?;
-            std::thread::sleep(Duration::from_millis(47));
+            match open() {
+                Ok(handle) => {
+                    first_try = false;
+                    loop {
+                        if let Err(e) = send(&handle, colors_at(start.elapsed().as_secs_f32())) {
+                            eprintln!("lost the mic ({e}); waiting for it to come back");
+                            break;
+                        }
+                        std::thread::sleep(Duration::from_millis(47));
+                    }
+                }
+                Err(e) if first_try => return Err(e),
+                Err(_) => {} // not back yet
+            }
+            std::thread::sleep(Duration::from_secs(2));
         }
     }
 }
