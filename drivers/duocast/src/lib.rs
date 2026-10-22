@@ -1,9 +1,84 @@
 //! HyperX DuoCast driver.
 
+use std::time::Duration;
+
 /// USB vendor id (03f0 is HP, which owns HyperX).
 pub const VENDOR_ID: u16 = 0x03f0;
 /// The mic's audio device. Its HID interface carries the mute button (the 0x098c Controller does not).
 pub const AUDIO_PRODUCT_ID: u16 = 0x0a8c;
+
+/// The Controller, the DuoCast's second USB device. Its first HID interface takes the lighting commands.
+pub const CONTROLLER_PRODUCT_ID: u16 = 0x098c;
+
+/// The two 64-byte packets that make the mic show one color. Decoded from our own capture of NGENUITY
+/// (see "Lighting protocol" in CLAUDE.md):
+///  - the first is a fixed header, `04 f2 ...` with a 1 in byte 8;
+///  - the second is 14 entries of 4 bytes, `81 red green blue`, then zeros. Only the first two entries carry
+///    the color; the other twelve are `81 00 00 00` (off).
+pub fn color_packets(rgb: [u8; 3]) -> [[u8; 64]; 2] {
+    let mut header = [0u8; 64];
+    header[..9].copy_from_slice(&[0x04, 0xf2, 0, 0, 0, 0, 0, 0, 0x01]);
+    let mut colors = [0u8; 64];
+    // `chunks_exact_mut(4)` walks the packet 4 bytes at a time; `take(14)` stops after the 14 entries.
+    for (i, entry) in colors.chunks_exact_mut(4).take(14).enumerate() {
+        entry[0] = 0x81;
+        if i < 2 {
+            entry[1..].copy_from_slice(&rgb);
+        }
+    }
+    [header, colors]
+}
+
+/// The HyperX DuoCast, as a `Device` the rest of MicDeck can control.
+pub struct DuoCast;
+
+/// Open the Controller over plain USB. The lighting interface has no input endpoint, so macOS never turns it
+/// into a HID device and the HID layer cannot reach it. But every USB device answers requests on its
+/// control endpoint, and that is how NGENUITY talks to it too.
+fn open() -> Result<rusb::DeviceHandle<rusb::GlobalContext>, String> {
+    rusb::open_device_with_vid_pid(VENDOR_ID, CONTROLLER_PRODUCT_ID).ok_or_else(|| "DuoCast Controller (03f0:098c) not found; is it plugged in?".into())
+}
+
+/// Send one color update (the two packets) to an open Controller.
+fn send(handle: &rusb::DeviceHandle<rusb::GlobalContext>, rgb: [u8; 3]) -> Result<(), String> {
+    for packet in color_packets(rgb) {
+        // HID SET_REPORT, the request NGENUITY sends: 0x21 = host-to-device, class request, to an
+        // interface; 0x09 = SET_REPORT; 0x0300 = report type 3 (feature) with report id 0; 0 = interface 0.
+        handle
+            .write_control(0x21, 0x09, 0x0300, 0, &packet, Duration::from_secs(1))
+            .map_err(|e| format!("could not send the color to the mic: {e}"))?;
+    }
+    Ok(())
+}
+
+impl DuoCast {
+    /// Keep the mic showing `rgb` until the process is stopped. The mic treats a color update as a live
+    /// preview and returns to its own default soon after the updates stop, so we repeat it about 21
+    /// times a second (every 47 ms), the rate NGENUITY uses in our capture.
+    pub fn hold_color(&self, rgb: [u8; 3]) -> Result<(), String> {
+        let handle = open()?;
+        loop {
+            send(&handle, rgb)?;
+            std::thread::sleep(Duration::from_millis(47));
+        }
+    }
+}
+
+impl micdeck_core::Device for DuoCast {
+    fn name(&self) -> &str {
+        "HyperX DuoCast"
+    }
+
+    fn capabilities(&self) -> &[micdeck_core::Capability] {
+        &[micdeck_core::Capability::Color]
+    }
+
+    /// Show a color once. It is a live preview, so the mic goes back to its own default after a moment;
+    /// use `DuoCast::hold_color` to keep it.
+    fn set_color(&mut self, rgb: [u8; 3]) -> Result<(), String> {
+        send(&open()?, rgb)
+    }
+}
 
 /// A HID "usage" is a pair of numbers that name a control: a page (the category) and a usage within it.
 /// Page 0xffc1 is vendor-defined, meaning HyperX picked these numbers themselves.
@@ -19,6 +94,27 @@ pub fn muted_from_hid(page: u32, usage: u32, value: isize) -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Turn a hex string like "81 ff" or "81ff" into bytes, zero-padded to a full 64-byte packet.
+    fn packet(hex: &str) -> [u8; 64] {
+        let hex: String = hex.split_whitespace().collect();
+        let mut out = [0u8; 64];
+        for (i, byte) in out.iter_mut().enumerate().take(hex.len() / 2) {
+            *byte = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap();
+        }
+        out
+    }
+
+    // The expected bytes below are the packets NGENUITY really sent in our capture, so these tests fail
+    // if our packets ever differ from the real ones.
+    #[test]
+    fn color_packets_match_what_ngenuity_sent() {
+        let ff0000 = "81ff000081ff0000 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000";
+        let blue = "810068ff810068ff 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000";
+        let header = packet("04f2000000000000 01");
+        assert_eq!(color_packets([0xff, 0, 0]), [header, packet(ff0000)]);
+        assert_eq!(color_packets([0x00, 0x68, 0xff]), [header, packet(blue)]);
+    }
 
     #[test]
     fn decodes_mute_button() {

@@ -5,3 +5,5 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+micdeck-core = { path = "../../core" }
+rusb = { version = "0.9.4", features = ["vendored"] }
