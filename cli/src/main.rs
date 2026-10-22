@@ -26,14 +26,33 @@ fn main() {
         ["audio"] => audio(None, None),
         ["gain", v] => v.parse().map_err(|_| "gain must be 0 to 100".to_string()).and_then(|v: f32| audio(Some(v / 100.0), None)),
         // `m @ ("on" | "off")` matches only those two words and keeps the one that matched in `m`.
+        ["color", hex] => color(hex, false),
+        ["color", hex, "hold"] => color(hex, true),
         ["mute", m @ ("on" | "off")] => audio(None, Some(m == "on")),
-        _ => Err("usage: micdeck devices | watch | audio | meeting on [strength 0-100] [output device name] | meeting off | meeting status | meeting <file.wav> [strength 0-100] | meeting-run [strength 0-100] [output device name] | gain <0-100> | mute on|off".into()),
+        _ => Err("usage: micdeck devices | watch | audio | meeting on [strength 0-100] [output device name] | meeting off | meeting status | meeting <file.wav> [strength 0-100] | meeting-run [strength 0-100] [output device name] | color <rrggbb> [hold] | gain <0-100> | mute on|off".into()),
     };
     // Print errors on stderr (not stdout) so they do not mix with a command's normal output.
     if let Err(e) = result {
         eprintln!("{e}");
         std::process::exit(1);
     }
+}
+
+/// Set the mic's light color from a hex code such as `ff0000` (red). A leading `#` is allowed. The mic treats
+/// this as a live preview that fades back after a moment; add `hold` to keep sending it until Ctrl-C.
+fn color(hex: &str, hold: bool) -> Result<(), String> {
+    use micdeck_core::Device;
+    let hex = hex.trim_start_matches('#');
+    // Six hex digits = three bytes: red, green, blue.
+    let value = (hex.len() == 6).then(|| u32::from_str_radix(hex, 16).ok()).flatten().ok_or("color must be six hex digits, like ff0000")?;
+    let [_, r, g, b] = value.to_be_bytes();
+    if hold {
+        println!("holding #{hex}; press Ctrl-C to stop");
+        return micdeck_duocast::DuoCast.hold_color([r, g, b]);
+    }
+    micdeck_duocast::DuoCast.set_color([r, g, b])?;
+    println!("color set to #{hex} (a preview: the mic goes back to its own default; use `hold` to keep it)");
+    Ok(())
 }
 
 /// Parse the 0-100 strength setting typed on the command line.
