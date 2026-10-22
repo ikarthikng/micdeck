@@ -10,20 +10,21 @@ pub const AUDIO_PRODUCT_ID: u16 = 0x0a8c;
 /// The Controller, the DuoCast's second USB device. Its first HID interface takes the lighting commands.
 pub const CONTROLLER_PRODUCT_ID: u16 = 0x098c;
 
-/// The two 64-byte packets that make the mic show one color. Decoded from our own capture of NGENUITY
-/// (see "Lighting protocol" in CLAUDE.md):
+/// The two 64-byte packets that make the mic show these colors, one for each of its two lights (zones).
+/// Decoded from our own capture of NGENUITY (see "Lighting protocol" in CLAUDE.md):
 ///  - the first is a fixed header, `04 f2 ...` with a 1 in byte 8;
 ///  - the second is 14 entries of 4 bytes, `81 red green blue`, then zeros. Only the first two entries carry
-///    the color; the other twelve are `81 00 00 00` (off).
-pub fn color_packets(rgb: [u8; 3]) -> [[u8; 64]; 2] {
+///    a color, one per zone (in every frame of our captures, even the effects); the other twelve are
+///    `81 00 00 00` (off).
+pub fn color_packets(zones: [[u8; 3]; 2]) -> [[u8; 64]; 2] {
     let mut header = [0u8; 64];
     header[..9].copy_from_slice(&[0x04, 0xf2, 0, 0, 0, 0, 0, 0, 0x01]);
     let mut colors = [0u8; 64];
     // `chunks_exact_mut(4)` walks the packet 4 bytes at a time; `take(14)` stops after the 14 entries.
     for (i, entry) in colors.chunks_exact_mut(4).take(14).enumerate() {
         entry[0] = 0x81;
-        if i < 2 {
-            entry[1..].copy_from_slice(&rgb);
+        if let Some(rgb) = zones.get(i) {
+            entry[1..].copy_from_slice(rgb);
         }
     }
     [header, colors]
@@ -39,9 +40,9 @@ fn open() -> Result<rusb::DeviceHandle<rusb::GlobalContext>, String> {
     rusb::open_device_with_vid_pid(VENDOR_ID, CONTROLLER_PRODUCT_ID).ok_or_else(|| "DuoCast Controller (03f0:098c) not found; is it plugged in?".into())
 }
 
-/// Send one color update (the two packets) to an open Controller.
-fn send(handle: &rusb::DeviceHandle<rusb::GlobalContext>, rgb: [u8; 3]) -> Result<(), String> {
-    for packet in color_packets(rgb) {
+/// Send one color update (the two packets, one color per zone) to an open Controller.
+fn send(handle: &rusb::DeviceHandle<rusb::GlobalContext>, zones: [[u8; 3]; 2]) -> Result<(), String> {
+    for packet in color_packets(zones) {
         // HID SET_REPORT, the request NGENUITY sends: 0x21 = host-to-device, class request, to an
         // interface; 0x09 = SET_REPORT; 0x0300 = report type 3 (feature) with report id 0; 0 = interface 0.
         handle
@@ -52,13 +53,20 @@ fn send(handle: &rusb::DeviceHandle<rusb::GlobalContext>, rgb: [u8; 3]) -> Resul
 }
 
 impl DuoCast {
-    /// Keep the mic showing `rgb` until the process is stopped. The mic treats a color update as a live
-    /// preview and returns to its own default soon after the updates stop, so we repeat it about 21
-    /// times a second (every 47 ms), the rate NGENUITY uses in our capture.
+    /// Keep the mic showing `rgb` on both lights until the process is stopped.
     pub fn hold_color(&self, rgb: [u8; 3]) -> Result<(), String> {
+        self.play(|_| [rgb, rgb])
+    }
+
+    /// Play lighting until the process is stopped. `colors_at(t)` says what the two lights should show `t`
+    /// seconds after the start (an effect, for instance). The mic treats a color update as a live preview and
+    /// returns to its own default soon after the updates stop, so we send one about 21 times a second (every
+    /// 47 ms), the rate NGENUITY uses in our capture.
+    pub fn play(&self, mut colors_at: impl FnMut(f32) -> [[u8; 3]; 2]) -> Result<(), String> {
         let handle = open()?;
+        let start = std::time::Instant::now();
         loop {
-            send(&handle, rgb)?;
+            send(&handle, colors_at(start.elapsed().as_secs_f32()))?;
             std::thread::sleep(Duration::from_millis(47));
         }
     }
@@ -76,7 +84,7 @@ impl micdeck_core::Device for DuoCast {
     /// Show a color once. It is a live preview, so the mic goes back to its own default after a moment;
     /// use `DuoCast::hold_color` to keep it.
     fn set_color(&mut self, rgb: [u8; 3]) -> Result<(), String> {
-        send(&open()?, rgb)
+        send(&open()?, [rgb, rgb])
     }
 }
 
@@ -112,8 +120,14 @@ mod tests {
         let ff0000 = "81ff000081ff0000 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000";
         let blue = "810068ff810068ff 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000";
         let header = packet("04f2000000000000 01");
-        assert_eq!(color_packets([0xff, 0, 0]), [header, packet(ff0000)]);
-        assert_eq!(color_packets([0x00, 0x68, 0xff]), [header, packet(blue)]);
+        assert_eq!(color_packets([[0xff, 0, 0]; 2]), [header, packet(ff0000)]);
+        assert_eq!(color_packets([[0x00, 0x68, 0xff]; 2]), [header, packet(blue)]);
+    }
+
+    #[test]
+    fn each_zone_gets_its_own_color() {
+        let both = "81010203 81040506 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000 81000000";
+        assert_eq!(color_packets([[1, 2, 3], [4, 5, 6]])[1], packet(both));
     }
 
     #[test]
