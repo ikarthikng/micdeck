@@ -54,3 +54,5 @@ mod tests {
         assert_eq!(with_brightness([255, 128, 0], 200), [255, 128, 0]); // over 100 counts as 100
     }
 }
+
+pub mod settings;

@@ -12,17 +12,19 @@ fn main() {
     let result = match args[..] {
         ["watch"] => watch(),
         // Meeting mode in the background (these must come before the `meeting <file>` arms below).
-        ["meeting", "on"] => background::on(60, "BlackHole"),
-        ["meeting", "on", n] => percent(n, "strength").and_then(|n| background::on(n, "BlackHole")),
-        ["meeting", "on", n, out] => percent(n, "strength").and_then(|n| background::on(n, out)),
+        ["meeting", "on"] => on(None, None),
+        ["meeting", "on", n] => percent(n, "strength").and_then(|n| on(Some(n), None)),
+        ["meeting", "on", n, out] => percent(n, "strength").and_then(|n| on(Some(n), Some(out))),
         ["meeting", "off"] => background::off(),
         ["meeting", "status"] => background::status(),
-        ["meeting", file] => meeting(file, 60),
-        ["meeting", file, n] => percent(n, "strength").and_then(|n| meeting(file, n)),
+        ["meeting", file] => meeting(file, None),
+        ["meeting", file, n] => percent(n, "strength").and_then(|n| meeting(file, Some(n))),
         ["devices"] => devices(),
-        ["meeting-run"] => run_live(60, None),
-        ["meeting-run", n] => percent(n, "strength").and_then(|n| run_live(n, None)),
-        ["meeting-run", n, out] => percent(n, "strength").and_then(|n| run_live(n, Some(out))),
+        ["meeting-run"] => run_live(None, None),
+        ["meeting-run", n] => percent(n, "strength").and_then(|n| run_live(Some(n), None)),
+        ["meeting-run", n, out] => percent(n, "strength").and_then(|n| run_live(Some(n), Some(out))),
+        ["settings"] => settings_show(),
+        ["settings", "set", key, value] => settings_set(key, value),
         ["audio"] => audio(None, None),
         ["gain", v] => v.parse().map_err(|_| "gain must be 0 to 100".to_string()).and_then(|v: f32| audio(Some(v / 100.0), None)),
         // `m @ ("on" | "off")` matches only those two words and keeps the one that matched in `m`.
@@ -31,7 +33,7 @@ fn main() {
         ["color", hex, n] => percent(n, "brightness").and_then(|n| color(hex, n, false)),
         ["color", hex, n, "hold"] => percent(n, "brightness").and_then(|n| color(hex, n, true)),
         ["mute", m @ ("on" | "off")] => audio(None, Some(m == "on")),
-        _ => Err("usage: micdeck devices | watch | audio | meeting on [strength 0-100] [output device name] | meeting off | meeting status | meeting <file.wav> [strength 0-100] | meeting-run [strength 0-100] [output device name] | color <rrggbb> [brightness 0-100] [hold] | gain <0-100> | mute on|off".into()),
+        _ => Err("usage: micdeck devices | watch | audio | meeting on [strength 0-100] [output name] | meeting off | meeting status | meeting <file.wav> [strength 0-100] | meeting-run [strength 0-100] [output name] | color <rrggbb> [brightness 0-100] [hold] | settings | settings set <strength|output> <value> | gain <0-100> | mute on|off".into()),
     };
     // Print errors on stderr (not stdout) so they do not mix with a command's normal output.
     if let Err(e) = result {
@@ -82,8 +84,13 @@ fn audio(gain: Option<f32>, mute: Option<bool>) -> Result<(), String> {
 }
 
 /// Clean a mono WAV recording and save it next to the original as `<name>.s<strength>.wav`.
-fn meeting(file: &str, strength: u8) -> Result<(), String> {
+fn meeting(file: &str, strength: Option<u8>) -> Result<(), String> {
     use micdeck_core::meeting::*;
+    // What was typed, else the saved setting.
+    let strength = match strength {
+        Some(n) => n,
+        None => micdeck_core::settings::Settings::load()?.strength,
+    };
     let (rate, samples) = read_wav(&std::fs::read(file).map_err(|e| format!("{file}: {e}"))?)?;
     // Measure how loud your voice is in this recording, then place the gate relative to that, so the same
     // strength works whether you were close to the mic or far from it.
@@ -108,18 +115,42 @@ fn devices() -> Result<(), String> {
     Ok(())
 }
 
-/// Clean the DuoCast's audio live and play it into an output device (default: the current output, e.g. your
-/// headphones; later a virtual mic such as "BlackHole 2ch"). Ctrl-C to stop.
-fn run_live(strength: u8, output: Option<&str>) -> Result<(), String> {
-    use micdeck_core::audio::*;
-    let input = find_input("duocast")?.ok_or("DuoCast audio device not found")?;
-    // Use the output the user named, or fall back to wherever macOS is currently playing sound.
-    let output = match output {
-        Some(name) => find_output(name)?.ok_or(format!("no output device matching \"{name}\""))?,
-        None => default_output()?,
-    };
-    println!("{} -> {}, strength {strength}. Use headphones. Ctrl-C to stop.", input.name, output.name);
-    micdeck_core::stream::run(&input, &output, strength)
+/// The strength and output device for meeting mode: what was typed on the command line, else what is saved.
+fn meeting_options(strength: Option<u8>, output: Option<&str>) -> Result<(u8, String), String> {
+    let saved = micdeck_core::settings::Settings::load()?;
+    Ok((strength.unwrap_or(saved.strength), output.map_or(saved.output, str::to_string)))
+}
+
+/// Start meeting mode in the background (see `background.rs`).
+fn on(strength: Option<u8>, output: Option<&str>) -> Result<(), String> {
+    let (strength, output) = meeting_options(strength, output)?;
+    background::on(strength, &output)
+}
+
+/// Clean the DuoCast's audio live in this terminal and play it into the output device (a virtual mic such as
+/// "BlackHole 2ch" by default, or headphones for testing). If the mic or the output is unplugged it waits
+/// and carries on when the device is back. Ctrl-C to stop.
+fn run_live(strength: Option<u8>, output: Option<&str>) -> Result<(), String> {
+    let (strength, output) = meeting_options(strength, output)?;
+    println!("DuoCast -> {output}, strength {strength}. Ctrl-C to stop.");
+    micdeck_core::stream::run("duocast", &output, strength)
+}
+
+/// Show the saved settings and where they are stored.
+fn settings_show() -> Result<(), String> {
+    let settings = micdeck_core::settings::Settings::load()?;
+    println!("strength = {}\noutput   = {}", settings.strength, settings.output);
+    println!("(stored in {})", micdeck_core::settings::Settings::path()?.display());
+    Ok(())
+}
+
+/// Change one saved setting.
+fn settings_set(key: &str, value: &str) -> Result<(), String> {
+    let mut settings = micdeck_core::settings::Settings::load()?;
+    settings.set(key, value)?;
+    settings.save()?;
+    println!("{key} saved as {value}");
+    Ok(())
 }
 
 /// Print "muted" / "unmuted" whenever the mic's mute button is pressed. Ctrl-C to stop.

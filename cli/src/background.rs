@@ -84,7 +84,14 @@ pub fn off() -> Result<(), String> {
 /// Say whether meeting mode is running.
 pub fn status() -> Result<(), String> {
     match running() {
-        Some(pid) => println!("meeting mode is on (pid {pid})"),
+        Some(pid) => {
+            println!("meeting mode is on (pid {pid})");
+            // The background process reports what it is doing in its log, e.g. "a device was unplugged".
+            let log = fs::read_to_string(log_file()).unwrap_or_default();
+            if let Some(last) = log.lines().rev().find(|line| !line.trim().is_empty()) {
+                println!("latest: {last}");
+            }
+        }
         None => println!("meeting mode is off"),
     }
     Ok(())
