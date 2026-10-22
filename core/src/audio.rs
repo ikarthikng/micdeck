@@ -3,13 +3,13 @@
 use std::ffi::{c_char, c_void};
 use std::mem::{size_of, MaybeUninit};
 
-type Id = u32;
+pub(crate) type Id = u32;
 
 #[repr(C)]
-struct Addr {
-    selector: u32,
-    scope: u32,
-    element: u32,
+pub(crate) struct Addr {
+    pub selector: u32,
+    pub scope: u32,
+    pub element: u32,
 }
 
 #[link(name = "CoreAudio", kind = "framework")]
@@ -27,24 +27,25 @@ extern "C" {
 }
 
 // Core Audio names its constants with four-letter codes.
-const fn fc(s: &[u8; 4]) -> u32 {
+pub(crate) const fn fc(s: &[u8; 4]) -> u32 {
     u32::from_be_bytes(*s)
 }
-const SYSTEM: Id = 1;
-const GLOBAL: u32 = fc(b"glob");
-const INPUT: u32 = fc(b"inpt");
+pub(crate) const SYSTEM: Id = 1;
+pub(crate) const GLOBAL: u32 = fc(b"glob");
+pub(crate) const INPUT: u32 = fc(b"inpt");
 const DEVICES: u32 = fc(b"dev#");
 const STREAMS: u32 = fc(b"stm#");
+pub(crate) const OUTPUT: u32 = fc(b"outp");
 const NAME: u32 = fc(b"lnam");
 const VOLUME: u32 = fc(b"volm");
 const MUTE: u32 = fc(b"mute");
 const UTF8: u32 = 0x0800_0100;
 
-fn check(status: i32, what: &str) -> Result<(), String> {
+pub(crate) fn check(status: i32, what: &str) -> Result<(), String> {
     if status == 0 { Ok(()) } else { Err(format!("{what} failed (Core Audio error {status})")) }
 }
 
-fn get<T>(id: Id, selector: u32, scope: u32, element: u32) -> Result<T, String> {
+pub(crate) fn get<T>(id: Id, selector: u32, scope: u32, element: u32) -> Result<T, String> {
     let addr = Addr { selector, scope, element };
     let mut size = size_of::<T>() as u32;
     let mut out = MaybeUninit::<T>::zeroed();
@@ -64,13 +65,14 @@ fn elements(id: Id, selector: u32) -> Vec<u32> {
     if has(0) { vec![0] } else { (1..=2).filter(|&e| has(e)).collect() }
 }
 
-pub struct InputDevice {
-    id: Id,
+/// An audio device (a mic, speakers, a virtual device).
+pub struct AudioDevice {
+    pub(crate) id: Id,
     pub name: String,
 }
 
-/// Every audio device that can record.
-pub fn input_devices() -> Result<Vec<InputDevice>, String> {
+/// Every audio device that has at least one stream in this direction (INPUT or OUTPUT).
+fn devices(scope: u32) -> Result<Vec<AudioDevice>, String> {
     let addr = Addr { selector: DEVICES, scope: GLOBAL, element: 0 };
     let mut size = 0;
     check(unsafe { AudioObjectGetPropertyDataSize(SYSTEM, &addr, 0, std::ptr::null(), &mut size) }, "list devices")?;
@@ -79,14 +81,30 @@ pub fn input_devices() -> Result<Vec<InputDevice>, String> {
 
     let mut out = vec![];
     for id in ids {
-        let saddr = Addr { selector: STREAMS, scope: INPUT, element: 0 };
+        let saddr = Addr { selector: STREAMS, scope, element: 0 };
         let mut n = 0;
-        let has_input = unsafe { AudioObjectGetPropertyDataSize(id, &saddr, 0, std::ptr::null(), &mut n) } == 0 && n > 0;
-        if has_input {
-            out.push(InputDevice { id, name: name(id)? });
+        let has_stream = unsafe { AudioObjectGetPropertyDataSize(id, &saddr, 0, std::ptr::null(), &mut n) } == 0 && n > 0;
+        if has_stream {
+            out.push(AudioDevice { id, name: name(id)? });
         }
     }
     Ok(out)
+}
+
+/// Every audio device that can record.
+pub fn input_devices() -> Result<Vec<AudioDevice>, String> {
+    devices(INPUT)
+}
+
+/// Every audio device that can play.
+pub fn output_devices() -> Result<Vec<AudioDevice>, String> {
+    devices(OUTPUT)
+}
+
+/// The output macOS currently plays sound through.
+pub fn default_output() -> Result<AudioDevice, String> {
+    let id: Id = get(SYSTEM, fc(b"dOut"), GLOBAL, 0)?;
+    Ok(AudioDevice { id, name: name(id)? })
 }
 
 fn name(id: Id) -> Result<String, String> {
@@ -102,12 +120,12 @@ fn name(id: Id) -> Result<String, String> {
 }
 
 /// First recording device whose name contains `part` (case-insensitive).
-pub fn find_input(part: &str) -> Result<Option<InputDevice>, String> {
+pub fn find_input(part: &str) -> Result<Option<AudioDevice>, String> {
     let part = part.to_lowercase();
     Ok(input_devices()?.into_iter().find(|d| d.name.to_lowercase().contains(&part)))
 }
 
-impl InputDevice {
+impl AudioDevice {
     /// Input gain, 0.0 to 1.0.
     pub fn gain(&self) -> Result<f32, String> {
         let e = *elements(self.id, VOLUME).first().ok_or("this device has no gain control")?;
@@ -134,4 +152,10 @@ impl InputDevice {
         }
         els.into_iter().try_for_each(|e| set(self.id, MUTE, e, m as u32))
     }
+}
+
+/// First playback device whose name contains `part` (case-insensitive).
+pub fn find_output(part: &str) -> Result<Option<AudioDevice>, String> {
+    let part = part.to_lowercase();
+    Ok(output_devices()?.into_iter().find(|d| d.name.to_lowercase().contains(&part)))
 }

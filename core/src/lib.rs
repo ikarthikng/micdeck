@@ -21,3 +21,8 @@ pub mod fake;
 
 #[cfg(target_os = "macos")]
 pub mod hid;
+
+pub mod meeting;
+
+#[cfg(target_os = "macos")]
+pub mod stream;
