@@ -60,8 +60,10 @@ Plan: (1) offline test on recorded WAVs [done, works well at strength 90]; (2) l
 
 - `core/src/stream.rs`: live Core Audio in -> LiveGate -> out (IOProc callbacks, mutex-guarded queue, both devices forced to 48 kHz). CLI: `micdeck devices` (list outputs), `micdeck meeting-run [strength] [output name]` (input is the DuoCast, output defaults to the current output). VERIFIED by the owner end to end with BlackHole 2ch as output: recorded `ffmpeg -f avfoundation -i ":BlackHole 2ch"` while `meeting-run 60 BlackHole` ran; result had clear voice and NO audible typing/mouse clicks (mic had been moved closer to the mouth, ~20 dB louder voice). Google Meet saw the BlackHole mic meter move. Install: `brew install blackhole-2ch`. `meeting-live` (stdin/stdout) was removed.
 
+- `stream::Engine` (start/stop pipeline; `Drop` stops the devices and frees the shared data) is the API the future menu-bar app will use in-process. `micdeck meeting on [strength] [output]` / `off` / `status` (cli/src/background.rs) is only a thin shim: it starts `micdeck meeting-run` detached (setsid), keeps the pid in `$TMPDIR/micdeck-meeting.pid`, errors go to `$TMPDIR/micdeck-meeting.log`; `on` waits 1.5 s so start-up failures are shown immediately. Default output is "BlackHole". No restart after crash/reboot. Decision: NOT launchd now, because a bare launchd binary has no app identity so macOS may silently deny microphone access (needs an app bundle), and a daemon design would need an IPC protocol; revisit with the menu-bar app.
+
 ## Next step
-`micdeck meeting on|off` (start/stop MicDeck feeding BlackHole in the background, so no terminal tab is needed), then try a real meeting from a personal context, then the menu-bar app. Open questions: typing WHILE speaking, background talkers while speaking (need a closer mic), automatic output level.
+Owner verifies audio flows from the detached process (record BlackHole while `meeting on` is active), then try a real call from a personal context, then the menu-bar app. Open questions: typing WHILE speaking, background talkers while speaking (need a closer mic), automatic output level.
 
 ## Later
 Lighting protocol (read QuadcastRGB for facts only vs own Windows capture), hotplug detection, saved profiles.
