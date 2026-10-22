@@ -1,3 +1,5 @@
+mod background;
+
 /// Reads the command line and runs the matching command. Every command returns `Result<(), String>`:
 /// `Ok` means it worked, `Err(message)` is printed to the user and the program exits with code 1.
 fn main() {
@@ -9,6 +11,12 @@ fn main() {
     // arguments whose first is "meeting", and names the other two `file` and `n`.
     let result = match args[..] {
         ["watch"] => watch(),
+        // Meeting mode in the background (these must come before the `meeting <file>` arms below).
+        ["meeting", "on"] => background::on(60, "BlackHole"),
+        ["meeting", "on", n] => strength(n).and_then(|n| background::on(n, "BlackHole")),
+        ["meeting", "on", n, out] => strength(n).and_then(|n| background::on(n, out)),
+        ["meeting", "off"] => background::off(),
+        ["meeting", "status"] => background::status(),
         ["meeting", file] => meeting(file, 60),
         ["meeting", file, n] => strength(n).and_then(|n| meeting(file, n)),
         ["devices"] => devices(),
@@ -19,7 +27,7 @@ fn main() {
         ["gain", v] => v.parse().map_err(|_| "gain must be 0 to 100".to_string()).and_then(|v: f32| audio(Some(v / 100.0), None)),
         // `m @ ("on" | "off")` matches only those two words and keeps the one that matched in `m`.
         ["mute", m @ ("on" | "off")] => audio(None, Some(m == "on")),
-        _ => Err("usage: micdeck devices | watch | audio | meeting <file.wav> [strength 0-100] | meeting-run [strength 0-100] [output device name] | gain <0-100> | mute on|off".into()),
+        _ => Err("usage: micdeck devices | watch | audio | meeting on [strength 0-100] [output device name] | meeting off | meeting status | meeting <file.wav> [strength 0-100] | meeting-run [strength 0-100] [output device name] | gain <0-100> | mute on|off".into()),
     };
     // Print errors on stderr (not stdout) so they do not mix with a command's normal output.
     if let Err(e) = result {

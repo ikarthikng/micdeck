@@ -46,6 +46,8 @@ type IoProc = extern "C" fn(Id, *const c_void, *const BufferList, *const c_void,
 extern "C" {
     fn AudioDeviceCreateIOProcID(dev: Id, proc_: IoProc, ctx: *mut c_void, out: *mut *const c_void) -> i32;
     fn AudioDeviceStart(dev: Id, proc_id: *const c_void) -> i32;
+    fn AudioDeviceStop(dev: Id, proc_id: *const c_void) -> i32;
+    fn AudioDeviceDestroyIOProcID(dev: Id, proc_id: *const c_void) -> i32;
     fn AudioObjectSetPropertyData(id: Id, addr: *const Addr, qn: u32, q: *const c_void, size: u32, data: *const c_void) -> i32;
 }
 
@@ -133,27 +135,64 @@ fn ensure_rate(dev: &AudioDevice) -> Result<(), String> {
     Ok(())
 }
 
-/// Register a callback with a device and start it. `id` is the handle Core Audio gives back for our callback.
-fn start(dev: &AudioDevice, io: IoProc, shared: *mut Shared) -> Result<(), String> {
-    let mut id = std::ptr::null();
-    check(unsafe { AudioDeviceCreateIOProcID(dev.id, io, shared.cast(), &mut id) }, &format!("open {}", dev.name))?;
-    check(unsafe { AudioDeviceStart(dev.id, id) }, &format!("start {}", dev.name))
+/// A running cleanup pipeline: DuoCast in, cleaned audio out. Audio flows from the moment `start` returns
+/// until the `Engine` is dropped, which stops the devices and frees everything. The future menu-bar app
+/// will own one of these directly; the CLI's `meeting on` runs one in a background process.
+pub struct Engine {
+    /// The callbacks that are running, as (device, handle Core Audio gave us for our callback).
+    running: Vec<(Id, *const c_void)>,
+    /// The data both callbacks share. We hold it as a raw pointer because Core Audio keeps a copy of the
+    /// pointer; it is freed in `drop`, after the callbacks have been stopped.
+    shared: *mut Shared,
 }
 
-/// Record from `input`, clean the audio with the given strength (0-100), play it into `output`.
-/// Runs until the process is stopped.
+impl Engine {
+    /// Record from `input`, clean the audio with the given strength (0-100), play it into `output`.
+    pub fn start(input: &AudioDevice, output: &AudioDevice, strength: u8) -> Result<Engine, String> {
+        ensure_rate(input)?;
+        ensure_rate(output)?;
+        // `Box::into_raw` moves the data to the heap and hands us a plain pointer; we free it ourselves in `drop`.
+        let shared = Box::into_raw(Box::new(Shared {
+            gate: Mutex::new(LiveGate::new(RATE, strength)),
+            queue: Mutex::new(VecDeque::from(vec![0.0; PREFILL])),
+        }));
+        // Create the Engine before starting anything, so that if the second device fails to start, `drop`
+        // still cleans up the first one.
+        let mut engine = Engine { running: vec![], shared };
+        // Start the output first so it is ready to play as soon as the first cleaned samples arrive.
+        engine.attach(output, on_output)?;
+        engine.attach(input, on_input)?;
+        Ok(engine)
+    }
+
+    /// Register a callback with a device and start it.
+    fn attach(&mut self, dev: &AudioDevice, io: IoProc) -> Result<(), String> {
+        let mut id = std::ptr::null();
+        check(unsafe { AudioDeviceCreateIOProcID(dev.id, io, self.shared.cast(), &mut id) }, &format!("open {}", dev.name))?;
+        self.running.push((dev.id, id)); // recorded before starting, so `drop` destroys it even if starting fails
+        check(unsafe { AudioDeviceStart(dev.id, id) }, &format!("start {}", dev.name))
+    }
+}
+
+impl Drop for Engine {
+    /// Runs automatically when the Engine goes out of scope (or the program exits normally).
+    fn drop(&mut self) {
+        // Stop every callback first. `AudioDeviceStop` does not return until a callback that is running
+        // right now has finished, so after this loop nothing touches `shared` any more.
+        for &(dev, id) in &self.running {
+            unsafe { AudioDeviceStop(dev, id) };
+        }
+        for &(dev, id) in &self.running {
+            unsafe { AudioDeviceDestroyIOProcID(dev, id) };
+        }
+        // Now it is safe to free the shared data: turn the raw pointer back into a Box and drop it.
+        drop(unsafe { Box::from_raw(self.shared) });
+    }
+}
+
+/// Run an `Engine` in the foreground until the process is stopped (Ctrl-C, or a kill signal).
 pub fn run(input: &AudioDevice, output: &AudioDevice, strength: u8) -> Result<(), String> {
-    ensure_rate(input)?;
-    ensure_rate(output)?;
-    // `Box::leak` puts the data on the heap and never frees it. That is intentional: the callbacks keep a
-    // pointer to it for as long as the program runs, so it must never be freed or moved.
-    let shared = Box::leak(Box::new(Shared {
-        gate: Mutex::new(LiveGate::new(RATE, strength)),
-        queue: Mutex::new(VecDeque::from(vec![0.0; PREFILL])),
-    }));
-    // Start the output first so it is ready to play as soon as the first cleaned samples arrive.
-    start(output, on_output, shared)?;
-    start(input, on_input, shared)?;
+    let _engine = Engine::start(input, output, strength)?;
     // The audio work happens on Core Audio's threads. This thread has nothing to do, so it sleeps. `park` can
     // wake up spuriously, which is why it sits in a loop.
     loop {
