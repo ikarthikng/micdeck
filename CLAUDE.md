@@ -4,6 +4,14 @@ Open-source Mac control software for USB mics that lack a native macOS app. Firs
 
 The owner is new to Rust and hardware work and relies on Claude for standards and best practice. Explain steps simply.
 
+## Git workflow (always follow)
+- **Never commit directly to `master`.** Every new feature, bug fix or chore gets its own branch, and the PR is how it reaches `master`.
+- **Start each branch from an up-to-date `master`:** `git switch master && git pull --ff-only`, then `git switch -c <type>/<short-name>`. Types: `feature/`, `fix/`, `chore/`.
+- **Commit only on that branch.** Small, clear commit messages.
+- **Pull request required.** The owner reviews the PR and merges it on GitHub. Claude never merges, and never pushes to `master`.
+- **Ask before pushing** a branch or opening a PR (it publishes work); the owner has said they will do or approve this.
+- After the owner merges: switch back to `master`, pull, and delete the finished local branch.
+
 ## Decisions made
 - **Name:** MicDeck (checked: free on Homebrew, crates.io, npm, PyPI; `micdeck.com` is taken; a small unrelated Windows repo `MicDeck` exists on GitHub). Trademark search not done.
 - **License:** GPL-3.0-only. The goal is credit plus keeping improvements open. Commercial use is allowed. The `LICENSE` file holds the official GPLv3 text, downloaded from gnu.org.
