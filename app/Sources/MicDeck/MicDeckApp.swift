@@ -82,6 +82,7 @@ struct PanelView: View {
                     .tint(.red)
                     .buttonStyle(.borderedProminent)
             }
+            Text("HyperX DuoCast").font(.caption).foregroundStyle(.secondary) // the only mic supported so far
             Divider()
             Toggle("Lights", isOn: Binding(get: { model.lightOn }, set: model.setLight))
             Picker("Effect", selection: $model.effect) {
