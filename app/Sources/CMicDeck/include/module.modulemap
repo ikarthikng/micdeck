@@ -1,0 +1,4 @@
+module CMicDeck {
+    header "micdeck.h"
+    export *
+}
