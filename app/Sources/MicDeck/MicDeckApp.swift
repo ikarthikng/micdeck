@@ -26,6 +26,7 @@ final class Model: ObservableObject {
     @Published var color = Color.orange { didSet { applyLight() } }
     @Published var brightness = 100.0 { didSet { applyLight() } }
     @Published var lightOn = false
+    @Published var marker = CGPoint(x: 0.5, y: 0.5) // where the color wheel's dot sits, 0...1 across the wheel
     @Published var error: String?
 
     static let swatches: [Color] = [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .pink, .white]
@@ -90,6 +91,11 @@ struct PanelView: View {
                         .onTapGesture { model.color = c }
                 }
             }
+            DisclosureGroup("Custom color") {
+                ColorWheel(model: model)
+                    .frame(width: 150, height: 150)
+                    .frame(maxWidth: .infinity)
+            }
             HStack {
                 Text("Brightness")
                 Slider(value: $model.brightness, in: 0...100)
@@ -102,5 +108,34 @@ struct PanelView: View {
         }
         .padding(14)
         .frame(width: 260)
+    }
+}
+
+/// A color wheel drawn inside the panel (the system picker opens a separate window, which closes the panel).
+/// The angle around the wheel is the hue (the color), the distance from the middle is the saturation (0 = white).
+struct ColorWheel: View {
+    @ObservedObject var model: Model
+
+    var body: some View {
+        GeometryReader { geo in
+            let size = min(geo.size.width, geo.size.height)
+            ZStack {
+                Circle().fill(AngularGradient(gradient: Gradient(colors: (0...12).map { Color(hue: Double($0) / 12, saturation: 1, brightness: 1) }), center: .center))
+                Circle().fill(RadialGradient(colors: [.white, .white.opacity(0)], center: .center, startRadius: 0, endRadius: size / 2))
+                Circle().stroke(Color.primary, lineWidth: 2).frame(width: 12, height: 12)
+                    .position(x: model.marker.x * size, y: model.marker.y * size)
+            }
+            .frame(width: size, height: size)
+            .gesture(DragGesture(minimumDistance: 0).onChanged { drag in
+                let r = size / 2
+                var dx = drag.location.x - r, dy = drag.location.y - r
+                let dist = sqrt(dx * dx + dy * dy)
+                if dist > r { dx *= r / dist; dy *= r / dist } // keep the dot inside the wheel
+                // The gradient starts at 3 o'clock and runs clockwise, which is what atan2 gives with y pointing down.
+                let hue = (atan2(dy, dx) / (2 * .pi)).truncatingRemainder(dividingBy: 1)
+                model.color = Color(hue: hue < 0 ? hue + 1 : hue, saturation: min(dist / r, 1), brightness: 1)
+                model.marker = CGPoint(x: (r + dx) / size, y: (r + dy) / size)
+            })
+        }
     }
 }
