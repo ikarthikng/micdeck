@@ -91,11 +91,10 @@ struct PanelView: View {
                         .onTapGesture { model.color = c }
                 }
             }
-            DisclosureGroup("Custom color") {
-                ColorWheel(model: model)
-                    .frame(width: 150, height: 150)
-                    .frame(maxWidth: .infinity)
-            }
+            // Always visible: the menu-bar panel does not resize when a section expands, so it got cut off.
+            ColorWheel(model: model)
+                .frame(width: 130, height: 130)
+                .frame(maxWidth: .infinity)
             HStack {
                 Text("Brightness")
                 Slider(value: $model.brightness, in: 0...100)
