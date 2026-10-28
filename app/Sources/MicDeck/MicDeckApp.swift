@@ -28,6 +28,7 @@ final class Model: ObservableObject {
     @Published var lightOn = false
     @Published var error: String?
 
+    static let swatches: [Color] = [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .pink, .white]
     static let effects = ["solid", "breathing", "cycle", "confetti", "sun", "twilight"]
 
     init() {
@@ -79,7 +80,16 @@ struct PanelView: View {
             Picker("Effect", selection: $model.effect) {
                 ForEach(Model.effects, id: \.self) { Text($0.capitalized).tag($0) }
             }
-            ColorPicker("Color", selection: $model.color, supportsOpacity: false)
+            // Swatches instead of the system ColorPicker: its separate color window makes the menu-bar panel close.
+            HStack {
+                Text("Color")
+                Spacer()
+                ForEach(Model.swatches, id: \.self) { c in
+                    Circle().fill(c).frame(width: 18, height: 18)
+                        .overlay(Circle().stroke(Color.primary, lineWidth: model.color == c ? 2 : 0))
+                        .onTapGesture { model.color = c }
+                }
+            }
             HStack {
                 Text("Brightness")
                 Slider(value: $model.brightness, in: 0...100)
