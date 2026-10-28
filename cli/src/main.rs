@@ -1,5 +1,8 @@
 mod background;
 
+/// The stop flag the command-line tool passes to long-running loops: Ctrl-C ends the process, so it never changes.
+static NEVER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 /// Reads the command line and runs the matching command. Every command returns `Result<(), String>`:
 /// `Ok` means it worked, `Err(message)` is printed to the user and the program exits with code 1.
 fn main() {
@@ -68,7 +71,7 @@ fn color(hex: &str, brightness: u8, hold: bool) -> Result<(), String> {
     let rgb = micdeck_core::with_brightness(parse_color(hex)?, brightness);
     if hold {
         println!("holding #{hex} at {brightness}% brightness; press Ctrl-C to stop");
-        return micdeck_duocast::DuoCast.hold_color(rgb);
+        return micdeck_duocast::DuoCast.hold_color(&NEVER, rgb);
     }
     micdeck_duocast::DuoCast.set_color(rgb)?;
     println!("color set to #{hex} at {brightness}% brightness (a preview: the mic goes back to its own default; use `hold` to keep it)");
@@ -89,7 +92,7 @@ fn effect(name: &str, hex: &str, brightness: u8) -> Result<(), String> {
     let effect = effects::Effect::parse(name).ok_or_else(|| format!("unknown effect \"{name}\"; choose one of: {}", effects::Effect::names()))?;
     let base = parse_color(hex)?;
     println!("playing {name} at {brightness}% brightness; press Ctrl-C to stop");
-    micdeck_duocast::DuoCast.play(|t| {
+    micdeck_duocast::DuoCast.play(&NEVER, |t| {
         // The DuoCast has two lights; dim each one by the brightness setting.
         let zones = effects::frame(effect, t, base, 2);
         [with_brightness(zones[0], brightness), with_brightness(zones[1], brightness)]
@@ -168,7 +171,7 @@ fn on(strength: Option<u8>, output: Option<&str>) -> Result<(), String> {
 fn run_live(strength: Option<u8>, output: Option<&str>) -> Result<(), String> {
     let (strength, output) = meeting_options(strength, output)?;
     println!("DuoCast -> {output}, strength {strength}. Ctrl-C to stop.");
-    micdeck_core::stream::run("duocast", &output, strength)
+    micdeck_core::stream::run(&NEVER, "duocast", &output, strength)
 }
 
 /// Show the saved settings and where they are stored.

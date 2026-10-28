@@ -122,6 +122,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "micdeck-ffi"
+version = "0.1.0"
+dependencies = [
+ "micdeck-core",
+ "micdeck-duocast",
+]
+
+[[package]]
 name = "nnnoiseless"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
