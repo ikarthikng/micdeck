@@ -1,0 +1,13 @@
+[package]
+name = "micdeck-ffi"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# `staticlib` makes cargo produce libmicdeck_ffi.a, one file the Swift app links in. `rlib` lets `cargo test` run.
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
+micdeck-core = { version = "0.1.0", path = "../core" }
+micdeck-duocast = { version = "0.1.0", path = "../drivers/duocast" }

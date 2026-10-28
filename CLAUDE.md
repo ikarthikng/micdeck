@@ -22,9 +22,9 @@ The owner is new to Rust and hardware work and relies on Claude for standards an
 - **Dependencies:** as few as possible. Prefer macOS built-in frameworks. Current: `nnnoiseless` 0.5.2 in core (pure-Rust RNNoise port, BSD-3-Clause, GPL-3 compatible, no system libs; pulls ~25 pure-Rust FFT/math crates; works on any macOS/arch). `rusb` (vendored libusb, only in the DuoCast driver crate, for the lighting USB control transfers). Ask before adding more.
 - **Modularity:** one driver crate per mic under `drivers/`, chosen at build time (Cargo features). The core defines a `Device` trait. Each driver declares its capabilities and frontends show only those controls.
 - **Order of work:** core library, then the `micdeck` CLI, then the GUI. Frontend and CLI both link the core library, with no background service unless hotplug needs one.
-- **Also planned:** hotplug detection, saved profiles, a fake mic for tests without hardware, a driver template plus a contributor guide, a universal (Apple Silicon + Intel) build.
+- **Also planned:** hotplug detection, saved profiles, a fake mic for tests without hardware, a driver template plus a contributor guide, Apple Silicon only builds (no Intel).
 - **Audio controls** (gain, sample rate) go through Core Audio, as a separate kind of module from USB lighting.
-- **Distribution:** GitHub releases with a .dmg. Unsigned at first (users right-click, Open). Signing and notarization later. App Store later.
+- **Distribution:** see "App plan" below.
 
 ## Hardware facts (from the owner's Mac)
 - HyperX DuoCast (audio): USB vendor 0x03f0, product 0x0a8c.
@@ -35,7 +35,7 @@ The owner is new to Rust and hardware work and relies on Claude for standards an
 
 ## Toolchain
 - Rust 1.99 via Homebrew `rustup` (keg-only). PATH needs `/opt/homebrew/opt/rustup/bin`.
-- Workspace: `core/` (micdeck-core), `drivers/duocast/` (micdeck-duocast), `cli/` (micdeck).
+- Workspace: `core/` (micdeck-core), `drivers/duocast/` (micdeck-duocast), `cli/` (micdeck), `ffi/` (micdeck-ffi, C interface for the Swift app: lights, meeting, mute callback, device lists; jobs run on threads with a stop flag).
 
 ## Done
 - USB exploration (done early, then `rusb` and the `inspect` command were removed in the ponytail cleanup, then `rusb` came back inside the DuoCast driver because lighting needs raw USB control transfers). Findings of 03f0:098c: interface 0 = HID, interrupt OUT 0x01 (8 bytes); interface 1 = HID, interrupt IN 0x82 (8 bytes, probably the mute/media keys). Interface 0's OUT endpoint is the likely lighting channel. HID report descriptors: interface 0 = vendor-defined (usage page 0xFF90, no report ID): 64-byte input report, 64-byte output report, and a feature report. The 64-byte output report is the likely lighting command. The endpoint max packet is only 8, so a report may be sent in chunks or via control transfer (SET_REPORT). Interface 1 = consumer keys (report ID 3, 16-bit usage) plus a vendor report ID 5 (7 bytes in). macOS refuses raw USB claims on the HID interfaces (even with sudo); use IOKit HID (`core/src/hid.rs`) instead.
@@ -78,8 +78,12 @@ Persistence question ANSWERED (captures `persistence.pcapng` and `persistence2.p
 At start-up NGENUITY also sends a query before streaming: SET_REPORT `04 58 00 ...` (feature, 64 bytes) then GET_REPORT (bmRequestType 0xa1, bRequest 0x01, wValue 0x0300, wLength 64), the mic answers `04 58 00 01 0d 00 01 28 ff` + zeros (probably device/firmware info; not needed for lighting, which works without it from the Mac).
 - Background lighting (`micdeck light on <effect> [rrggbb] [brightness 0-100]` / `light off` / `light status`; `solid` with a color is a steady color): starts `micdeck effect ...` detached, like meeting mode. `cli/src/background.rs` is now a generic `Job` (MEETING marker "meeting-run", LIGHT marker " effect "), each with its own pid and log file in $TMPDIR, so meeting mode and lighting can run together. Verified on the owner's mic: breathing in the background, a second start is refused, switching to cycle works, `light off` makes the mic return to its own color. `DuoCast::play` (also behind `effect` and `color ... hold`) now survives an unplug: it waits and resumes when the mic is back (a mic missing at the start is still an immediate error). Messages: "{name} started/stopped/is running/is not running".
 
-## Next step
-Owner tests the unplug case for lighting (start `light on cycle`, pull the cable 5 s, plug in; `light status` shows the latest message), then the menu-bar app (it will own the engine and the lighting stream in-process; it can read the same settings file). Smaller later items: save a default light in the settings file, a driver template + contributor guide, a universal (Apple Silicon + Intel) build.
+## App plan (decided)
+- Ship a `.dmg` from GitHub releases, **Apple Silicon only**, no App Store, no paid Apple account for now (ad-hoc signed; users do right-click > Open or System Settings > Privacy & Security > Open Anyway). The user installs the app and nothing else.
+- Frontend: SwiftUI menu-bar app (`LSUIElement`) linking the Rust staticlib from `ffi/` (C interface in `ffi/micdeck.h`), engines in-process. Built with SwiftPM (works with the command line tools; full Xcode not required), wrapped into `MicDeck.app`, `.dmg` via `hdiutil`.
+- v1 INCLUDES Meeting mode. Meeting mode needs a virtual mic (macOS apps cannot create one; only an audio driver can), so MicDeck must ship its own driver (an AudioServerPlugIn, derived from BlackHole, which is allowed because MicDeck is GPL-3.0; rename it via its compile constants) installed to /Library/Audio/Plug-Ins/HAL with an admin password. OPEN RISK: whether an ad-hoc signed driver loads on Apple Silicon; needs an experiment (the owner runs the privileged steps). Until then BlackHole works.
+- With Meeting mode off, the user picks the raw mic in their meeting app; mute indicator and lights keep working from the app.
+- Order: (1) `ffi/` crate [done on feature/ffi-library], (2) Swift menu-bar skeleton with mute indicator + lights, (3) meeting toggle, strength slider, mic chooser, (4) build script for `.app` and `.dmg` + README with Gatekeeper steps, (5) driver experiment/installer. Later: mic choice for other mics (AirPods need resampling to 48 kHz).
 
-## Later
-Lighting protocol (read QuadcastRGB for facts only vs own Windows capture), hotplug detection, saved profiles.
+## Next step
+Finish `ffi/`, then the Swift menu-bar app. Smaller later items: save a default light in the settings file, a driver template + contributor guide.

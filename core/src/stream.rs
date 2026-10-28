@@ -13,6 +13,7 @@ use crate::audio::{check, fc, find_input, find_output, get, Addr, AudioDevice, I
 use crate::meeting::LiveGate;
 use std::collections::VecDeque;
 use std::ffi::c_void;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use std::time::Duration;
 
@@ -200,13 +201,13 @@ fn look(input_name: &str, output_name: &str) -> (Option<AudioDevice>, Option<Aud
     (find_input(input_name).ok().flatten(), find_output(output_name).ok().flatten())
 }
 
-/// Run the cleanup until the process is stopped (Ctrl-C, or a kill signal): record from the device whose
+/// Run the cleanup until `stop` is set to true (or the process is killed): record from the device whose
 /// name contains `input_name`, play into the one that contains `output_name`.
 ///
 /// It survives unplugging. If either device disappears, the audio is stopped, and it starts again when
 /// both are back. A device that is missing right at the start is an error instead, so a typo in a name is
 /// reported at once and not waited on forever. Progress messages go to stderr.
-pub fn run(input_name: &str, output_name: &str, strength: u8) -> Result<(), String> {
+pub fn run(stop: &AtomicBool, input_name: &str, output_name: &str, strength: u8) -> Result<(), String> {
     let mut first_try = true;
     loop {
         match look(input_name, output_name) {
@@ -214,10 +215,13 @@ pub fn run(input_name: &str, output_name: &str, strength: u8) -> Result<(), Stri
                 Ok(engine) => {
                     eprintln!("running: {} -> {}", input.name, output.name);
                     // The audio itself runs on Core Audio's threads; this thread just waits until a device disappears.
-                    while let (Some(_), Some(_)) = look(input_name, output_name) {
+                    while !stop.load(Ordering::Relaxed) && matches!(look(input_name, output_name), (Some(_), Some(_))) {
                         std::thread::sleep(POLL);
                     }
                     drop(engine); // stops the audio and frees everything (see `Engine`'s `drop`)
+                    if stop.load(Ordering::Relaxed) {
+                        return Ok(());
+                    }
                     eprintln!("a device was unplugged; waiting for it to come back");
                 }
                 Err(e) if first_try => return Err(e),
@@ -228,6 +232,9 @@ pub fn run(input_name: &str, output_name: &str, strength: u8) -> Result<(), Stri
             _ => {} // not back yet; keep waiting
         }
         first_try = false;
+        if stop.load(Ordering::Relaxed) {
+            return Ok(());
+        }
         std::thread::sleep(POLL);
     }
 }

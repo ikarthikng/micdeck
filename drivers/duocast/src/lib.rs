@@ -1,5 +1,6 @@
 //! HyperX DuoCast driver.
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 /// USB vendor id (03f0 is HP, which owns HyperX).
@@ -53,26 +54,27 @@ fn send(handle: &rusb::DeviceHandle<rusb::GlobalContext>, zones: [[u8; 3]; 2]) -
 }
 
 impl DuoCast {
-    /// Keep the mic showing `rgb` on both lights until the process is stopped.
-    pub fn hold_color(&self, rgb: [u8; 3]) -> Result<(), String> {
-        self.play(|_| [rgb, rgb])
+    /// Keep the mic showing `rgb` on both lights until `stop` is set to true.
+    pub fn hold_color(&self, stop: &AtomicBool, rgb: [u8; 3]) -> Result<(), String> {
+        self.play(stop, |_| [rgb, rgb])
     }
 
-    /// Play lighting until the process is stopped. `colors_at(t)` says what the two lights should show `t`
+    /// Play lighting until `stop` is set to true (a command-line tool that stops with Ctrl-C passes a flag that
+    /// never changes; the app sets it from another thread). `colors_at(t)` says what the two lights should show `t`
     /// seconds after the start (an effect, for instance). The mic treats a color update as a live preview and
     /// returns to its own default soon after the updates stop, so we send one about 21 times a second (every
     /// 47 ms), the rate NGENUITY uses in our capture.
     ///
     /// If the mic is unplugged while playing, it waits and carries on when the mic is back. A mic that is
     /// missing right at the start is an error instead. Progress messages go to stderr.
-    pub fn play(&self, mut colors_at: impl FnMut(f32) -> [[u8; 3]; 2]) -> Result<(), String> {
+    pub fn play(&self, stop: &AtomicBool, mut colors_at: impl FnMut(f32) -> [[u8; 3]; 2]) -> Result<(), String> {
         let start = std::time::Instant::now();
         let mut first_try = true;
         loop {
             match open() {
                 Ok(handle) => {
                     first_try = false;
-                    loop {
+                    while !stop.load(Ordering::Relaxed) {
                         if let Err(e) = send(&handle, colors_at(start.elapsed().as_secs_f32())) {
                             eprintln!("lost the mic ({e}); waiting for it to come back");
                             break;
@@ -82,6 +84,9 @@ impl DuoCast {
                 }
                 Err(e) if first_try => return Err(e),
                 Err(_) => {} // not back yet
+            }
+            if stop.load(Ordering::Relaxed) {
+                return Ok(());
             }
             std::thread::sleep(Duration::from_secs(2));
         }

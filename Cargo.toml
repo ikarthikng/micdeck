@@ -1,5 +1,5 @@
 [workspace]
-members = ["core", "drivers/duocast", "cli"]
+members = ["core", "drivers/duocast", "cli", "ffi"]
 resolver = "2"
 
 [workspace.package]
