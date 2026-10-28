@@ -73,9 +73,15 @@ struct PanelView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Label(model.muted ? "Muted" : "Live", systemImage: model.muted ? "mic.slash.fill" : "mic.fill")
-                .font(.headline)
-                .foregroundStyle(model.muted ? .red : .green)
+            HStack {
+                Label(model.muted ? "Muted" : "Live", systemImage: model.muted ? "mic.slash.fill" : "mic.fill")
+                    .font(.headline)
+                    .foregroundStyle(model.muted ? .red : .green)
+                Spacer()
+                Button("Quit") { md_light_stop(); NSApp.terminate(nil) }
+                    .tint(.red)
+                    .buttonStyle(.borderedProminent)
+            }
             Divider()
             Toggle("Lights", isOn: Binding(get: { model.lightOn }, set: model.setLight))
             Picker("Effect", selection: $model.effect) {
@@ -102,8 +108,6 @@ struct PanelView: View {
             if let e = model.error {
                 Text(e).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
             }
-            Divider()
-            Button("Quit MicDeck") { md_light_stop(); NSApp.terminate(nil) }
         }
         .padding(14)
         .frame(width: 260)
