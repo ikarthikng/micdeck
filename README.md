@@ -34,7 +34,7 @@ To use it:
 3. In your meeting app, choose **BlackHole 2ch** as the microphone.
 4. Keep MicDeck running during the call. Turning Meeting mode off, or quitting MicDeck, stops the cleanup, so switch your meeting app back to the normal mic first.
 
-Tips: the biggest improvement comes from putting the mic close to your mouth and the keyboard away from it. The mic's own mute button does not mute BlackHole; mute inside your meeting app as usual.
+Tips: the biggest improvement comes from putting the mic close to your mouth and the keyboard away from it. The mic's mute button silences the mic, so the meeting hears nothing, but the meeting app does not know about it and will not show its muted icon; use the meeting app's own mute if you want others to see it.
 
 ## Requirements
 - A Mac with Apple Silicon, macOS 13 or newer.
