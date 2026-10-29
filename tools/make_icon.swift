@@ -86,6 +86,11 @@ png("app/Resources/dmg-background.png", 1320, 800) {
     arrow.move(to: NSPoint(x: 520, y: 360)); arrow.line(to: NSPoint(x: 800, y: 360))
     arrow.move(to: NSPoint(x: 760, y: 400)); arrow.line(to: NSPoint(x: 800, y: 360)); arrow.line(to: NSPoint(x: 760, y: 320))
     NSColor.white.withAlphaComponent(0.5).setStroke(); arrow.stroke()
+    // Finder always writes icon names in dark text, so give each name a light chip to be readable on the dark picture.
+    for x in [330.0, 990.0] {
+        NSColor.white.withAlphaComponent(0.88).setFill()
+        NSBezierPath(roundedRect: NSRect(x: x - 130, y: 204, width: 260, height: 56), xRadius: 14, yRadius: 14).fill()
+    }
     text("First time opening it? System Settings > Privacy & Security > Open Anyway.", size: 26, alpha: 0.7, y: 140)
     text("Meeting mode (optional) needs BlackHole 2ch, a free driver by another developer.", size: 26, alpha: 0.7, y: 96)
     text("Steps and links: github.com/ikarthikng/micdeck", size: 26, alpha: 0.7, y: 52)
