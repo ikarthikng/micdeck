@@ -44,7 +44,12 @@ STAGE=dist/stage
 mkdir -p "$STAGE/.background"
 cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
-cp app/Resources/dmg-background.png "$STAGE/.background/background.png"
+# Finder shows a background at its pixel size, so a sharp (2x) picture must be combined with a normal-size copy
+# in one TIFF; Finder then picks the right one and scales it to the window.
+sips -z 400 660 app/Resources/dmg-background.png --out dist/bg1x.png >/dev/null
+cp app/Resources/dmg-background.png dist/bg2x.png
+tiffutil -cathidpicheck dist/bg1x.png dist/bg2x.png -out "$STAGE/.background/background.tiff"
+rm dist/bg1x.png dist/bg2x.png
 cp app/Resources/dmg-readme.txt "$STAGE/READ ME FIRST.txt"
 cp app/Resources/AppIcon.icns "$STAGE/.VolumeIcon.icns"
 
@@ -66,7 +71,7 @@ tell application "Finder"
     set opts to the icon view options of container window
     set arrangement of opts to not arranged
     set icon size of opts to 112
-    set background picture of opts to file ".background:background.png"
+    set background picture of opts to file ".background:background.tiff"
     set position of item "MicDeck.app" of container window to {165, 250}
     set position of item "Applications" of container window to {495, 250}
     set position of item "READ ME FIRST.txt" of container window to {330, 350}
