@@ -1,4 +1,6 @@
-# MicDeck
+<p align="center"><img src="app/Resources/AppIcon.png" alt="MicDeck logo" width="160"></p>
+
+<h1 align="center">MicDeck</h1>
 
 Open-source control software for USB mics that have no native macOS app. First target: HyperX DuoCast.
 

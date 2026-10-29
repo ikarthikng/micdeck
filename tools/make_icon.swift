@@ -89,3 +89,13 @@ png("app/Resources/dmg-background.png", 1320, 800) {
     text("Meeting mode needs BlackHole 2ch, a free audio driver by another developer (optional).", size: 26, alpha: 0.6, y: 110)
     text("Read about it first: existential.audio/blackhole", size: 26, alpha: 0.6, y: 62)
 }
+
+// 5. GitHub's social preview (1280x640), shown when the repo link is shared. Upload it by hand in the repo's
+//    Settings > General > Social preview; GitHub has no way to set it from a file in the repo.
+png("app/Resources/social-preview.png", 1280, 640) {
+    NSGradient(starting: darkTop, ending: darkBottom)!.draw(in: NSRect(x: 0, y: 0, width: 1280, height: 640), angle: -90)
+    drawLogo(in: NSRect(x: 110, y: 110, width: 420, height: 420))
+    "MicDeck".draw(at: NSPoint(x: 590, y: 330), withAttributes: [.font: NSFont.systemFont(ofSize: 110, weight: .bold), .foregroundColor: NSColor.white])
+    "Control software for USB mics on macOS.\nLights, mute indicator and meeting-mode noise cleanup.".draw(in: NSRect(x: 594, y: 190, width: 620, height: 110), withAttributes: [
+        .font: NSFont.systemFont(ofSize: 30, weight: .regular), .foregroundColor: NSColor.white.withAlphaComponent(0.7)])
+}
