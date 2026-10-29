@@ -81,13 +81,14 @@ png("app/Resources/dmg-background.png", 1320, 800) {
             .font: NSFont.systemFont(ofSize: size, weight: .medium), .foregroundColor: NSColor.white.withAlphaComponent(alpha), .paragraphStyle: centered])
     }
     text("Drag MicDeck onto Applications", size: 40, alpha: 0.9, y: 460)
-    // The two icons sit at (330, 250) and (990, 250) in this picture; the arrow goes between them.
+    // The two icons (96 pt) sit at (330, 360) and (990, 360) in this picture (bottom-up pixels); the arrow goes between them.
     let arrow = NSBezierPath(); arrow.lineWidth = 8; arrow.lineCapStyle = .round; arrow.lineJoinStyle = .round
-    arrow.move(to: NSPoint(x: 520, y: 300)); arrow.line(to: NSPoint(x: 800, y: 300))
-    arrow.move(to: NSPoint(x: 760, y: 340)); arrow.line(to: NSPoint(x: 800, y: 300)); arrow.line(to: NSPoint(x: 760, y: 260))
+    arrow.move(to: NSPoint(x: 520, y: 360)); arrow.line(to: NSPoint(x: 800, y: 360))
+    arrow.move(to: NSPoint(x: 760, y: 400)); arrow.line(to: NSPoint(x: 800, y: 360)); arrow.line(to: NSPoint(x: 760, y: 320))
     NSColor.white.withAlphaComponent(0.5).setStroke(); arrow.stroke()
-    text("Meeting mode needs BlackHole 2ch, a free audio driver by another developer (optional).", size: 26, alpha: 0.6, y: 110)
-    text("Read about it first: existential.audio/blackhole", size: 26, alpha: 0.6, y: 62)
+    text("First time opening it? System Settings > Privacy & Security > Open Anyway.", size: 26, alpha: 0.7, y: 140)
+    text("Meeting mode (optional) needs BlackHole 2ch, a free driver by another developer.", size: 26, alpha: 0.7, y: 96)
+    text("Steps and links: github.com/ikarthikng/micdeck", size: 26, alpha: 0.7, y: 52)
 }
 
 // 5. GitHub's social preview (1280x640), shown when the repo link is shared. Upload it by hand in the repo's

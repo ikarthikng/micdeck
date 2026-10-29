@@ -1,7 +1,7 @@
 #!/bin/bash
 # Builds MicDeck.app and a drag-to-install .dmg for Apple Silicon. Run from the repo root: tools/build_dmg.sh
 # Output: dist/MicDeck-<version>-arm64.dmg. The app is only ad-hoc signed (no paid Apple account), so macOS asks
-# users to confirm once; app/Resources/dmg-readme.txt explains that inside the .dmg.
+# users to confirm once; the .dmg background and the README explain how.
 set -euo pipefail
 export PATH=/opt/homebrew/opt/rustup/bin:$PATH
 
@@ -50,7 +50,6 @@ sips -z 400 660 app/Resources/dmg-background.png --out dist/bg1x.png >/dev/null
 cp app/Resources/dmg-background.png dist/bg2x.png
 tiffutil -cathidpicheck dist/bg1x.png dist/bg2x.png -out "$STAGE/.background/background.tiff"
 rm dist/bg1x.png dist/bg2x.png
-cp app/Resources/dmg-readme.txt "$STAGE/READ ME FIRST.txt"
 cp app/Resources/AppIcon.icns "$STAGE/.VolumeIcon.icns"
 
 # A writable disk image first, so Finder can be told how the window should look; then it is compressed and locked.
@@ -59,7 +58,7 @@ hdiutil create -quiet -srcfolder "$STAGE" -volname "$VOL" -fs HFS+ -format UDRW 
 hdiutil attach -quiet -readwrite -noverify -noautoopen dist/rw.dmg
 SetFile -a C "/Volumes/$VOL" 2>/dev/null || echo "(no SetFile: the disk keeps a plain icon)"
 
-# Window size and icon positions match dmg-background.png (660x400 points; the app sits at x=165, Applications at x=495).
+# Window size and icon positions match dmg-background.png (660x400 points; the app sits at x=165, Applications at x=495, both at y=220).
 osascript <<OSA || echo "(could not style the window; allow this terminal to control Finder and run again)"
 tell application "Finder"
   tell disk "$VOL"
@@ -70,11 +69,10 @@ tell application "Finder"
     set the bounds of container window to {200, 120, 860, 542}
     set opts to the icon view options of container window
     set arrangement of opts to not arranged
-    set icon size of opts to 112
+    set icon size of opts to 96
     set background picture of opts to file ".background:background.tiff"
-    set position of item "MicDeck.app" of container window to {165, 250}
-    set position of item "Applications" of container window to {495, 250}
-    set position of item "READ ME FIRST.txt" of container window to {330, 350}
+    set position of item "MicDeck.app" of container window to {165, 220}
+    set position of item "Applications" of container window to {495, 220}
     close
     open
     update without registering applications
