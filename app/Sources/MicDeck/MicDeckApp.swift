@@ -211,28 +211,29 @@ struct ColorWheel: View {
     }
 }
 
-/// The menu-bar icon, drawn in code: a microphone with sound bars on both sides, and a slash through it when
-/// muted. It is a "template" image: macOS recolors it for light/dark menu bars, so we only draw the shape.
+/// The menu-bar icon, drawn in code: the app icon's microphone on a deck, in one color, with a slash through it
+/// when muted. It is a "template" image: macOS recolors it for light/dark menu bars, so we only draw the shape.
 func menuBarIcon(muted: Bool) -> NSImage {
     let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
         NSColor.black.set()
-        // The microphone head.
-        NSBezierPath(roundedRect: NSRect(x: 6.5, y: 7, width: 5, height: 9), xRadius: 2.5, yRadius: 2.5).fill()
-        // The holder under it, the stem, and the sound bars to the left and right.
+        // The microphone head and the deck it stands on.
+        NSBezierPath(roundedRect: NSRect(x: 6.5, y: 8, width: 5, height: 8), xRadius: 2.5, yRadius: 2.5).fill()
+        let deck = NSBezierPath()
+        deck.move(to: NSPoint(x: 5, y: 5)); deck.line(to: NSPoint(x: 13, y: 5))
+        deck.line(to: NSPoint(x: 16, y: 1)); deck.line(to: NSPoint(x: 2, y: 1)); deck.close()
+        deck.fill()
+        // The holder around the head, and the stem down to the deck.
         let lines = NSBezierPath()
-        lines.lineWidth = 1.5
+        lines.lineWidth = 1.4
         lines.lineCapStyle = .round
-        lines.appendArc(withCenter: NSPoint(x: 9, y: 9), radius: 5, startAngle: 180, endAngle: 360)
-        for (from, to) in [((9.0, 4.0), (9.0, 2.0)), ((1.5, 8.0), (1.5, 11.0)), ((16.5, 8.0), (16.5, 11.0))] {
-            lines.move(to: NSPoint(x: from.0, y: from.1))
-            lines.line(to: NSPoint(x: to.0, y: to.1))
-        }
+        lines.appendArc(withCenter: NSPoint(x: 9, y: 10.5), radius: 4.5, startAngle: 180, endAngle: 360)
+        lines.move(to: NSPoint(x: 9, y: 6)); lines.line(to: NSPoint(x: 9, y: 5))
         lines.stroke()
         if muted {
             // A slash with a small gap around it: first erase a wide stripe, then draw the thinner line over it.
             let slash = NSBezierPath()
-            slash.move(to: NSPoint(x: 2, y: 16))
-            slash.line(to: NSPoint(x: 16, y: 2))
+            slash.move(to: NSPoint(x: 2, y: 17))
+            slash.line(to: NSPoint(x: 16, y: 1))
             slash.lineCapStyle = .round
             NSGraphicsContext.current?.compositingOperation = .clear
             slash.lineWidth = 4

@@ -85,5 +85,7 @@ At start-up NGENUITY also sends a query before streaming: SET_REPORT `04 58 00 .
 - With Meeting mode off, the user picks the raw mic in their meeting app; mute indicator and lights keep working from the app.
 - Order: (1) `ffi/` crate [done on feature/ffi-library], (2) Swift menu-bar skeleton with mute indicator + lights, (3) meeting toggle, strength slider, mic chooser, (4) build script for `.app` and `.dmg` + README with Gatekeeper steps (put a short "read me first" text file in the .dmg that says Meeting mode needs BlackHole and links its website and GitHub page; the user decides whether to install it), (5) README and BlackHole docs. Later: mic choice for other mics (AirPods need resampling to 48 kHz).
 
+- App icon: `tools/make_icon.swift` draws it (mic on a deck, neon gradient on black) and writes `app/Resources/AppIcon.png`; `AppIcon.icns` is made from it with `sips` + `iconutil` (see the commit that added it). The build script must copy the .icns into the .app (Info.plist `CFBundleIconFile`). The menu-bar icon is separate and drawn in code (`menuBarIcon` in MicDeckApp.swift).
+
 ## Next step
 Finish `ffi/`, then the Swift menu-bar app. Smaller later items: save a default light in the settings file, a driver template + contributor guide.
