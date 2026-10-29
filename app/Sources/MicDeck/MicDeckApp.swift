@@ -211,35 +211,24 @@ struct ColorWheel: View {
     }
 }
 
-/// The menu-bar icon, drawn in code: the app icon's microphone on a deck, in one color, with a slash through it
-/// when muted. It is a "template" image: macOS recolors it for light/dark menu bars, so we only draw the shape.
+/// The menu-bar icon: the logo as a one-colour silhouette (Resources/MenuBarIcon.png, made by tools/make_icon.swift),
+/// with a slash through it when muted. It is a "template" image: macOS recolors it for light/dark menu bars.
 func menuBarIcon(muted: Bool) -> NSImage {
-    let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { _ in
-        NSColor.black.set()
-        // The microphone head and the deck it stands on.
-        NSBezierPath(roundedRect: NSRect(x: 6.5, y: 8, width: 5, height: 8), xRadius: 2.5, yRadius: 2.5).fill()
-        let deck = NSBezierPath()
-        deck.move(to: NSPoint(x: 5, y: 5)); deck.line(to: NSPoint(x: 13, y: 5))
-        deck.line(to: NSPoint(x: 16, y: 1)); deck.line(to: NSPoint(x: 2, y: 1)); deck.close()
-        deck.fill()
-        // The holder around the head, and the stem down to the deck.
-        let lines = NSBezierPath()
-        lines.lineWidth = 1.4
-        lines.lineCapStyle = .round
-        lines.appendArc(withCenter: NSPoint(x: 9, y: 10.5), radius: 4.5, startAngle: 180, endAngle: 360)
-        lines.move(to: NSPoint(x: 9, y: 6)); lines.line(to: NSPoint(x: 9, y: 5))
-        lines.stroke()
+    let logo = Bundle.module.url(forResource: "MenuBarIcon", withExtension: "png").flatMap { NSImage(contentsOf: $0) } ?? NSImage()
+    let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
+        logo.draw(in: rect)
         if muted {
             // A slash with a small gap around it: first erase a wide stripe, then draw the thinner line over it.
             let slash = NSBezierPath()
-            slash.move(to: NSPoint(x: 2, y: 17))
-            slash.line(to: NSPoint(x: 16, y: 1))
+            slash.move(to: NSPoint(x: 1, y: 17))
+            slash.line(to: NSPoint(x: 17, y: 1))
             slash.lineCapStyle = .round
             NSGraphicsContext.current?.compositingOperation = .clear
             slash.lineWidth = 4
             slash.stroke()
             NSGraphicsContext.current?.compositingOperation = .sourceOver
-            slash.lineWidth = 1.5
+            NSColor.black.set()
+            slash.lineWidth = 1.8
             slash.stroke()
         }
         return true

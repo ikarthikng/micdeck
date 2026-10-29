@@ -15,6 +15,7 @@ let package = Package(
         .executableTarget(
             name: "MicDeck",
             dependencies: ["CMicDeck"],
+            resources: [.process("Resources")],
             linkerSettings: [
                 .unsafeFlags(["-L" + rustLibs, "-lmicdeck_ffi"]),
                 .linkedFramework("CoreAudio"),
