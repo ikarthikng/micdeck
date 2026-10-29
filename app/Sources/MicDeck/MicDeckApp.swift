@@ -161,7 +161,11 @@ struct PanelView: View {
                     Link("Source code", destination: URL(string: "https://github.com/ExistentialAudio/BlackHole")!)
                 }.font(.caption)
             }
-            Picker("Mic", selection: $model.input) {
+            if model.hasBlackHole {
+                Text("Cleans your mic and sends it to BlackHole 2ch, which acts as a new microphone. In your meeting app, pick BlackHole 2ch as the microphone.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Picker("Your mic", selection: $model.input) {
                 ForEach(model.inputs, id: \.self) { Text($0).tag($0) }
             }
             Picker("Send to", selection: $model.output) {
