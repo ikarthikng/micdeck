@@ -29,6 +29,15 @@ final class Model: ObservableObject {
     @Published var marker = CGPoint(x: 0.5, y: 0.5) // where the color wheel's dot sits, 0...1 across the wheel
     @Published var error: String?
 
+    // Meeting mode. The choices are remembered between runs in the app's own preferences (UserDefaults).
+    @Published var meetingOn = false
+    @Published var strength = Double(UserDefaults.standard.object(forKey: "strength") as? Int ?? 60) { didSet { UserDefaults.standard.set(Int(strength), forKey: "strength") } }
+    @Published var input = UserDefaults.standard.string(forKey: "input") ?? "HyperX DuoCast" { didSet { UserDefaults.standard.set(input, forKey: "input"); applyMeeting() } }
+    @Published var output = UserDefaults.standard.string(forKey: "output") ?? "BlackHole 2ch" { didSet { UserDefaults.standard.set(output, forKey: "output"); applyMeeting() } }
+    @Published var duocastConnected = false // the mic the lights and mute button belong to
+    @Published var inputs: [String] = []
+    @Published var outputs: [String] = []
+
     static let swatches: [Color] = [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .pink, .white]
     static let effects = ["solid", "breathing", "cycle", "confetti", "sun", "twilight"]
 
@@ -43,6 +52,36 @@ final class Model: ObservableObject {
         }, me)
         // Rust threads report failures asynchronously, so look for new messages twice a second.
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.poll() }
+        // The device lists change when something is plugged in, so refresh them every 2 seconds.
+        refreshDevices()
+        Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.refreshDevices() }
+    }
+
+    /// Read a list of device names (one per line) from the Rust library.
+    private func devices(inputs: Bool) -> [String] {
+        guard let p = md_devices(inputs) else { return [] }
+        defer { md_free_string(p) }
+        return String(cString: p).split(separator: "\n").map(String.init)
+    }
+
+    /// Update the mic and output lists. The chosen names always stay in the lists, even if that device is unplugged.
+    private func refreshDevices() {
+        let ins = devices(inputs: true), outs = devices(inputs: false)
+        duocastConnected = ins.contains { $0.localizedCaseInsensitiveContains("duocast") }
+        inputs = ins.contains(input) ? ins : ins + [input]
+        outputs = outs.contains(output) ? outs : outs + [output]
+    }
+
+    /// Switch meeting mode on/off.
+    func setMeeting(_ on: Bool) {
+        meetingOn = on
+        if on { applyMeeting() } else { md_meeting_stop() }
+    }
+
+    /// (Re)start meeting mode with the current choices. Does nothing while it is switched off.
+    func applyMeeting() {
+        guard meetingOn else { return }
+        md_meeting_start(input, output, UInt8(strength))
     }
 
     /// Show the newest error from the Rust side, and notice if the light job has ended by itself.
@@ -52,6 +91,7 @@ final class Model: ObservableObject {
             md_free_string(p)
         }
         if lightOn && !md_light_running() { lightOn = false }
+        if meetingOn && !md_meeting_running() { meetingOn = false }
     }
 
     /// Switch the lights on/off.
@@ -78,11 +118,11 @@ struct PanelView: View {
                     .font(.headline)
                     .foregroundStyle(model.muted ? .red : .green)
                 Spacer()
-                Button("Quit") { md_light_stop(); NSApp.terminate(nil) }
+                Button("Quit") { md_light_stop(); md_meeting_stop(); NSApp.terminate(nil) }
                     .tint(.red)
                     .buttonStyle(.borderedProminent)
             }
-            Text("HyperX DuoCast").font(.caption).foregroundStyle(.secondary) // the only mic supported so far
+            Text(model.duocastConnected ? "HyperX DuoCast" : "HyperX DuoCast: not connected").font(.caption).foregroundStyle(.secondary) // the only mic with lights and a mute button so far
             Divider()
             Toggle("Lights", isOn: Binding(get: { model.lightOn }, set: model.setLight))
             Picker("Effect", selection: $model.effect) {
@@ -105,6 +145,20 @@ struct PanelView: View {
             HStack {
                 Text("Brightness")
                 Slider(value: $model.brightness, in: 0...100)
+            }
+            Divider()
+            Toggle("Meeting mode", isOn: Binding(get: { model.meetingOn }, set: model.setMeeting))
+            Picker("Mic", selection: $model.input) {
+                ForEach(model.inputs, id: \.self) { Text($0).tag($0) }
+            }
+            Picker("Send to", selection: $model.output) {
+                ForEach(model.outputs, id: \.self) { Text($0).tag($0) }
+            }
+            HStack {
+                Text("Strength")
+                // Restart only when the slider is let go, so the audio is not interrupted while dragging.
+                Slider(value: $model.strength, in: 0...100, onEditingChanged: { editing in if !editing { model.applyMeeting() } })
+                Text("\(Int(model.strength))").monospacedDigit().frame(width: 28, alignment: .trailing)
             }
             if let e = model.error {
                 Text(e).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
