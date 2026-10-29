@@ -4,7 +4,15 @@
 
 <p align="center">Open-source control software for USB mics that have no native macOS app.<br>First supported mic: HyperX DuoCast.</p>
 
-> **Status: early development.** There is no downloadable release yet; see [Build from source](#build-from-source). MicDeck is not affiliated with HyperX or HP.
+> **Status: early development.** MicDeck is not affiliated with HyperX or HP.
+
+## Install
+1. Download **MicDeck-x.y.z-arm64.dmg** from the [latest release](https://github.com/ikarthikng/micdeck/releases/latest) (Apple Silicon Macs only).
+2. Open it and drag **MicDeck** onto **Applications**.
+3. Open MicDeck from Applications. macOS blocks apps that are not signed with a paid Apple developer account, so the first time go to **System Settings > Privacy & Security**, scroll down and click **Open Anyway** next to MicDeck. You only do this once.
+4. Look for the MicDeck icon in the menu bar (top right of the screen).
+
+Want Meeting mode? Read [Requirements](#requirements) first: it needs a free extra app, BlackHole 2ch.
 
 ## What it does
 MicDeck lives in your menu bar (Apple Silicon Macs, macOS 13 or newer).
@@ -55,6 +63,8 @@ cd app && swift build                    # or open app/Package.swift in Xcode an
 ```
 
 Look for the MicDeck icon in the menu bar.
+
+To build the installer yourself, run `tools/build_dmg.sh`. It makes `dist/MicDeck-<version>-arm64.dmg` (Apple Silicon, ad-hoc signed). macOS asks you to confirm once when opening an app that is not signed with a paid Apple account; see Install above (System Settings > Privacy & Security > Open Anyway).
 
 ## Command line
 The same features are available without the app. Build with `cargo build` and run `cargo run -p micdeck -- <command>`:
