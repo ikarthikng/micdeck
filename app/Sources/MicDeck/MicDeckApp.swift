@@ -152,8 +152,12 @@ struct PanelView: View {
             Toggle("Meeting mode", isOn: Binding(get: { model.meetingOn }, set: model.setMeeting))
                 .disabled(!model.hasBlackHole)
             if !model.hasBlackHole {
-                Text("Meeting mode needs the free BlackHole 2ch audio driver. Install it with: brew install blackhole-2ch")
+                Text("Meeting mode needs BlackHole 2ch, a free audio driver from another developer. MicDeck does not install it; read about it first, then install it yourself if you want Meeting mode.")
                     .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Link("BlackHole website", destination: URL(string: "https://existential.audio/blackhole/")!)
+                    Link("Source code", destination: URL(string: "https://github.com/ExistentialAudio/BlackHole")!)
+                }.font(.caption)
             }
             Picker("Mic", selection: $model.input) {
                 ForEach(model.inputs, id: \.self) { Text($0).tag($0) }
