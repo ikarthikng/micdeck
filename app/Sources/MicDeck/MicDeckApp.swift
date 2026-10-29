@@ -34,6 +34,7 @@ final class Model: ObservableObject {
     @Published var strength = Double(UserDefaults.standard.object(forKey: "strength") as? Int ?? 60) { didSet { UserDefaults.standard.set(Int(strength), forKey: "strength") } }
     @Published var input = UserDefaults.standard.string(forKey: "input") ?? "HyperX DuoCast" { didSet { UserDefaults.standard.set(input, forKey: "input"); applyMeeting() } }
     @Published var output = UserDefaults.standard.string(forKey: "output") ?? "BlackHole 2ch" { didSet { UserDefaults.standard.set(output, forKey: "output"); applyMeeting() } }
+    @Published var hasBlackHole = false // Meeting mode needs a virtual mic; we rely on BlackHole
     @Published var duocastConnected = false // the mic the lights and mute button belong to
     @Published var inputs: [String] = []
     @Published var outputs: [String] = []
@@ -68,6 +69,7 @@ final class Model: ObservableObject {
     private func refreshDevices() {
         let ins = devices(inputs: true), outs = devices(inputs: false)
         duocastConnected = ins.contains { $0.localizedCaseInsensitiveContains("duocast") }
+        hasBlackHole = outs.contains { $0.localizedCaseInsensitiveContains("blackhole") }
         inputs = ins.contains(input) ? ins : ins + [input]
         outputs = outs.contains(output) ? outs : outs + [output]
     }
@@ -148,6 +150,11 @@ struct PanelView: View {
             }
             Divider()
             Toggle("Meeting mode", isOn: Binding(get: { model.meetingOn }, set: model.setMeeting))
+                .disabled(!model.hasBlackHole)
+            if !model.hasBlackHole {
+                Text("Meeting mode needs the free BlackHole 2ch audio driver. Install it with: brew install blackhole-2ch")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
             Picker("Mic", selection: $model.input) {
                 ForEach(model.inputs, id: \.self) { Text($0).tag($0) }
             }
