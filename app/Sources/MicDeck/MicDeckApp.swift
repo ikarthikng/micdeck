@@ -12,8 +12,10 @@ struct MicDeckApp: App {
     }
 
     var body: some Scene {
-        MenuBarExtra("MicDeck", systemImage: model.muted ? "mic.slash.fill" : "mic.fill") {
+        MenuBarExtra {
             PanelView(model: model)
+        } label: {
+            Image(nsImage: menuBarIcon(muted: model.muted))
         }
         .menuBarExtraStyle(.window)
     }
@@ -29,6 +31,16 @@ final class Model: ObservableObject {
     @Published var marker = CGPoint(x: 0.5, y: 0.5) // where the color wheel's dot sits, 0...1 across the wheel
     @Published var error: String?
 
+    // Meeting mode. The choices are remembered between runs in the app's own preferences (UserDefaults).
+    @Published var meetingOn = false
+    @Published var strength = Double(UserDefaults.standard.object(forKey: "strength") as? Int ?? 60) { didSet { UserDefaults.standard.set(Int(strength), forKey: "strength") } }
+    @Published var input = UserDefaults.standard.string(forKey: "input") ?? "HyperX DuoCast" { didSet { UserDefaults.standard.set(input, forKey: "input"); applyMeeting() } }
+    @Published var output = UserDefaults.standard.string(forKey: "output") ?? "BlackHole 2ch" { didSet { UserDefaults.standard.set(output, forKey: "output"); applyMeeting() } }
+    @Published var hasBlackHole = false // Meeting mode needs a virtual mic; we rely on BlackHole
+    @Published var duocastConnected = false // the mic the lights and mute button belong to
+    @Published var inputs: [String] = []
+    @Published var outputs: [String] = []
+
     static let swatches: [Color] = [.red, .orange, .yellow, .green, .cyan, .blue, .purple, .pink, .white]
     static let effects = ["solid", "breathing", "cycle", "confetti", "sun", "twilight"]
 
@@ -43,6 +55,37 @@ final class Model: ObservableObject {
         }, me)
         // Rust threads report failures asynchronously, so look for new messages twice a second.
         Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in self?.poll() }
+        // The device lists change when something is plugged in, so refresh them every 2 seconds.
+        refreshDevices()
+        Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.refreshDevices() }
+    }
+
+    /// Read a list of device names (one per line) from the Rust library.
+    private func devices(inputs: Bool) -> [String] {
+        guard let p = md_devices(inputs) else { return [] }
+        defer { md_free_string(p) }
+        return String(cString: p).split(separator: "\n").map(String.init)
+    }
+
+    /// Update the mic and output lists. The chosen names always stay in the lists, even if that device is unplugged.
+    private func refreshDevices() {
+        let ins = devices(inputs: true), outs = devices(inputs: false)
+        duocastConnected = ins.contains { $0.localizedCaseInsensitiveContains("duocast") }
+        hasBlackHole = outs.contains { $0.localizedCaseInsensitiveContains("blackhole") }
+        inputs = ins.contains(input) ? ins : ins + [input]
+        outputs = outs.contains(output) ? outs : outs + [output]
+    }
+
+    /// Switch meeting mode on/off.
+    func setMeeting(_ on: Bool) {
+        meetingOn = on
+        if on { applyMeeting() } else { md_meeting_stop() }
+    }
+
+    /// (Re)start meeting mode with the current choices. Does nothing while it is switched off.
+    func applyMeeting() {
+        guard meetingOn else { return }
+        md_meeting_start(input, output, UInt8(strength))
     }
 
     /// Show the newest error from the Rust side, and notice if the light job has ended by itself.
@@ -52,6 +95,7 @@ final class Model: ObservableObject {
             md_free_string(p)
         }
         if lightOn && !md_light_running() { lightOn = false }
+        if meetingOn && !md_meeting_running() { meetingOn = false }
     }
 
     /// Switch the lights on/off.
@@ -78,11 +122,11 @@ struct PanelView: View {
                     .font(.headline)
                     .foregroundStyle(model.muted ? .red : .green)
                 Spacer()
-                Button("Quit") { md_light_stop(); NSApp.terminate(nil) }
+                Button("Quit") { md_light_stop(); md_meeting_stop(); NSApp.terminate(nil) }
                     .tint(.red)
                     .buttonStyle(.borderedProminent)
             }
-            Text("HyperX DuoCast").font(.caption).foregroundStyle(.secondary) // the only mic supported so far
+            Text(model.duocastConnected ? "HyperX DuoCast" : "HyperX DuoCast: not connected").font(.caption).foregroundStyle(.secondary) // the only mic with lights and a mute button so far
             Divider()
             Toggle("Lights", isOn: Binding(get: { model.lightOn }, set: model.setLight))
             Picker("Effect", selection: $model.effect) {
@@ -105,6 +149,33 @@ struct PanelView: View {
             HStack {
                 Text("Brightness")
                 Slider(value: $model.brightness, in: 0...100)
+            }
+            Divider()
+            Toggle("Meeting mode", isOn: Binding(get: { model.meetingOn }, set: model.setMeeting))
+                .disabled(!model.hasBlackHole)
+            if !model.hasBlackHole {
+                Text("Meeting mode needs BlackHole 2ch, a free audio driver from another developer. MicDeck does not install it; read about it first, then install it yourself if you want Meeting mode.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+                HStack {
+                    Link("BlackHole website", destination: URL(string: "https://existential.audio/blackhole/")!)
+                    Link("Source code", destination: URL(string: "https://github.com/ExistentialAudio/BlackHole")!)
+                }.font(.caption)
+            }
+            if model.hasBlackHole {
+                Text("Cleans your mic and sends it to BlackHole 2ch, which acts as a new microphone. In your meeting app, pick BlackHole 2ch as the microphone.")
+                    .font(.caption).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            Picker("Your mic", selection: $model.input) {
+                ForEach(model.inputs, id: \.self) { Text($0).tag($0) }
+            }
+            Picker("Send to", selection: $model.output) {
+                ForEach(model.outputs, id: \.self) { Text($0).tag($0) }
+            }
+            HStack {
+                Text("Strength")
+                // Restart only when the slider is let go, so the audio is not interrupted while dragging.
+                Slider(value: $model.strength, in: 0...100, onEditingChanged: { editing in if !editing { model.applyMeeting() } })
+                Text("\(Int(model.strength))").monospacedDigit().frame(width: 28, alignment: .trailing)
             }
             if let e = model.error {
                 Text(e).font(.caption).foregroundStyle(.red).fixedSize(horizontal: false, vertical: true)
@@ -142,4 +213,30 @@ struct ColorWheel: View {
             })
         }
     }
+}
+
+/// The menu-bar icon: the logo as a one-colour silhouette (Resources/MenuBarIcon.png, made by tools/make_icon.swift),
+/// with a slash through it when muted. It is a "template" image: macOS recolors it for light/dark menu bars.
+func menuBarIcon(muted: Bool) -> NSImage {
+    let logo = Bundle.module.url(forResource: "MenuBarIcon", withExtension: "png").flatMap { NSImage(contentsOf: $0) } ?? NSImage()
+    let image = NSImage(size: NSSize(width: 18, height: 18), flipped: false) { rect in
+        logo.draw(in: rect)
+        if muted {
+            // A slash with a small gap around it: first erase a wide stripe, then draw the thinner line over it.
+            let slash = NSBezierPath()
+            slash.move(to: NSPoint(x: 1, y: 17))
+            slash.line(to: NSPoint(x: 17, y: 1))
+            slash.lineCapStyle = .round
+            NSGraphicsContext.current?.compositingOperation = .clear
+            slash.lineWidth = 4
+            slash.stroke()
+            NSGraphicsContext.current?.compositingOperation = .sourceOver
+            NSColor.black.set()
+            slash.lineWidth = 1.8
+            slash.stroke()
+        }
+        return true
+    }
+    image.isTemplate = true
+    return image
 }
