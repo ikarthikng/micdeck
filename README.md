@@ -56,6 +56,8 @@ cd app && swift build                    # or open app/Package.swift in Xcode an
 
 Look for the MicDeck icon in the menu bar.
 
+To build the installer yourself, run `tools/build_dmg.sh`. It makes `dist/MicDeck-<version>-arm64.dmg` (Apple Silicon, ad-hoc signed). macOS asks you to confirm once when opening an app that is not signed with a paid Apple account; the `READ ME FIRST.txt` inside the .dmg explains how (System Settings > Privacy & Security > Open Anyway).
+
 ## Command line
 The same features are available without the app. Build with `cargo build` and run `cargo run -p micdeck -- <command>`:
 
